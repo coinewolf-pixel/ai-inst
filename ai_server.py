@@ -12,6 +12,8 @@ API (ключ передаётся в заголовке  Authorization: Bearer 
   POST /api/ask      {"task": "..."}                      -> {"answer", "memory", "files"}
   POST /api/save     {"task": "...", "solution": "..."}   -> сохранить рабочее решение в память
   POST /api/learn    {"name": "файл.txt", "text": "..."}  -> добавить текст в базу знаний
+  POST /api/upload   {"name": "фото.jpg", "data": "base64"} -> любой файл: текст, PDF, фото, видео, аудио
+  GET  /api/jobs                                          -> что сейчас обрабатывается в фоне
   GET  /api/docs                                          -> список загруженных файлов
   GET  /api/health                                        -> проверка, что сервер жив (без ключа)
 """
@@ -28,11 +30,59 @@ import ai  # noqa: E402
 HOST = os.environ.get("AI_SERVER_HOST", "0.0.0.0")
 PORT = int(os.environ.get("AI_SERVER_PORT", "8000"))
 KEY = os.environ.get("AI_SERVER_KEY", "")
-MAX_BODY = 20 * 1024 * 1024  # 20 МБ на запрос
+MAX_BODY = 700 * 1024 * 1024  # до ~500 МБ файла (base64 раздувает размер на треть)
 UPLOAD_DIR = os.path.expanduser("~/znaniya/uploads")
 
 # Процессор тянет один запрос за раз: остальные ждут в очереди, а не тормозят друг друга.
 MODEL_LOCK = threading.Lock()
+
+# Фоновая обработка фото и видео: она долгая, поэтому браузер не ждёт её окончания.
+JOBS = []          # [{"file": ..., "status": "в очереди" / "обрабатывается" / "готово" / "ошибка: ..."}]
+JOBS_LOCK = threading.Lock()
+
+
+def set_job(job, status):
+    with JOBS_LOCK:
+        job["status"] = status
+
+
+def process_upload(path, job):
+    """Обрабатывает сохранённый файл: текст и PDF через ai.py, медиа через ai_media.py."""
+    import tempfile
+    ext = os.path.splitext(path)[1].lower()
+    try:
+        with MODEL_LOCK:
+            set_job(job, "обрабатывается")
+            if ext in ai.TEXT_EXT or ext == ".pdf":
+                text = ai.read_file(path) or ""
+                kind = None
+            else:
+                import ai_media
+                with tempfile.TemporaryDirectory() as tmp:
+                    if ext in ai_media.IMG_EXT:
+                        text = ai_media.process_image(path, tmp)
+                    elif ext in ai_media.VID_EXT:
+                        text = ai_media.process_video(path, tmp)
+                    else:
+                        text = ai_media.process_audio(path, tmp)
+                kind = "media"
+            if not text.strip():
+                return set_job(job, "ошибка: не удалось извлечь содержимое")
+            con = ai.db()
+            con.execute("DELETE FROM docs WHERE path = ?", (path,))
+            parts = list(ai.chunks(text))
+            name = os.path.basename(path)
+            for i, part in enumerate(parts):
+                emb = ai.embed(f"{name}\n{part}" if kind else part)
+                con.execute("INSERT INTO docs (path, part, text, embedding) VALUES (?, ?, ?, ?)",
+                            (path, i, part, json.dumps(emb)))
+            con.commit()
+            con.close()
+        set_job(job, f"готово, частей: {len(parts)}")
+    except SystemExit as e:  # ai_media сообщает об отсутствии ffmpeg через sys.exit
+        set_job(job, f"ошибка: {e}")
+    except Exception as e:
+        set_job(job, f"ошибка: {e}")
 
 PAGE = """<!DOCTYPE html>
 <html lang="ru"><head><meta charset="utf-8">
@@ -54,9 +104,11 @@ PAGE = """<!DOCTYPE html>
 <textarea id="task" placeholder="Напишите задачу..."></textarea>
 <div class="row"><button id="send">Отправить</button></div>
 <details><summary>Добавить файл в базу знаний</summary>
- <p>Текстовые файлы: .txt, .md, код, .csv. PDF загружайте через команду learn на сервере.</p>
+ <p>Можно: тексты, код, PDF, фото (jpg, png, webp), видео (mp4, mov, mkv), аудио (mp3, wav, m4a).
+ Фото и видео обрабатываются в фоне: на процессоре фото занимает минуты, видео дольше.</p>
  <input id="file" type="file" multiple><div class="row"><button id="up" class="grey">Загрузить</button></div>
  <div id="upinfo" class="meta"></div>
+ <div id="jobs" class="meta" style="white-space:pre-wrap"></div>
 </details>
 <script>
 const $=id=>document.getElementById(id);
@@ -89,12 +141,24 @@ $("up").onclick=async()=>{
   const files=[...$("file").files]; if(!files.length) return;
   $("up").disabled=true;
   for(const f of files){
-    $("upinfo").textContent="Загружаю "+f.name+"...";
-    try{ const j=await api("/api/learn",{name:f.name,text:await f.text()}); $("upinfo").textContent=f.name+": "+j.parts+" частей добавлено"; }
-    catch(e){ $("upinfo").textContent=f.name+": "+e.message; }
+    $("upinfo").textContent="Отправляю "+f.name+"...";
+    try{
+      const data=await new Promise((ok,bad)=>{const r=new FileReader();r.onload=()=>ok(String(r.result).split(",")[1]||"");r.onerror=()=>bad(new Error("не удалось прочитать файл"));r.readAsDataURL(f);});
+      await api("/api/upload",{name:f.name,data});
+      $("upinfo").textContent=f.name+": принят, обрабатывается";
+    }catch(e){ $("upinfo").textContent=f.name+": "+e.message; }
   }
-  $("up").disabled=false;
+  $("up").disabled=false; jobs();
 };
+async function jobs(){
+  try{
+    const r=await fetch("/api/jobs",{headers:hdr()}); if(!r.ok) return;
+    const j=await r.json();
+    $("jobs").textContent=j.jobs.slice(-10).reverse().map(x=>x.file+" — "+x.status).join("\\n");
+    if(j.jobs.some(x=>x.status==="в очереди"||x.status==="обрабатывается")) setTimeout(jobs,5000);
+  }catch(e){}
+}
+jobs();
 </script></body></html>"""
 
 
@@ -135,6 +199,11 @@ class Handler(BaseHTTPRequestHandler):
             rows = con.execute("SELECT path, COUNT(*) FROM docs GROUP BY path ORDER BY path").fetchall()
             con.close()
             return self.send(200, {"docs": [{"file": p, "parts": n} for p, n in rows]})
+        if self.path == "/api/jobs":
+            if not self.authorized():
+                return self.send(401, {"error": "Неверный ключ"})
+            with JOBS_LOCK:
+                return self.send(200, {"jobs": [dict(j) for j in JOBS[-50:]]})
         self.send(404, {"error": "Нет такого адреса"})
 
     def do_POST(self):
@@ -174,6 +243,33 @@ class Handler(BaseHTTPRequestHandler):
                     con.commit()
                     con.close()
                 return self.send(200, {"ok": True, "parts": len(parts)})
+            if self.path == "/api/upload":
+                import base64
+                import binascii
+                name = os.path.basename(str(b.get("name", "")).strip())
+                if not name:
+                    return self.send(400, {"error": "Нет имени файла"})
+                ext = os.path.splitext(name)[1].lower()
+                allowed = ai.TEXT_EXT | {".pdf", ".jpg", ".jpeg", ".png", ".webp", ".bmp", ".gif",
+                                         ".mp4", ".mov", ".mkv", ".avi", ".webm", ".m4v",
+                                         ".mp3", ".wav", ".m4a", ".ogg", ".flac", ".opus"}
+                if ext not in allowed:
+                    return self.send(400, {"error": f"Тип {ext or 'без расширения'} не поддерживается"})
+                try:
+                    raw = base64.b64decode(str(b.get("data", "")), validate=True)
+                except (binascii.Error, ValueError):
+                    return self.send(400, {"error": "Файл повреждён при передаче"})
+                if not raw:
+                    return self.send(400, {"error": "Пустой файл"})
+                os.makedirs(UPLOAD_DIR, exist_ok=True)
+                path = os.path.join(UPLOAD_DIR, name)
+                with open(path, "wb") as f:
+                    f.write(raw)
+                job = {"file": name, "status": "в очереди"}
+                with JOBS_LOCK:
+                    JOBS.append(job)
+                threading.Thread(target=process_upload, args=(path, job), daemon=True).start()
+                return self.send(200, {"ok": True, "queued": name})
             self.send(404, {"error": "Нет такого адреса"})
         except ValueError as e:
             self.send(400, {"error": str(e)})
