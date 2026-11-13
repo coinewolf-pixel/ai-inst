@@ -96,7 +96,7 @@ def look(jpeg_path, prompt):
         raise ai.AIError(f"Ошибка модели зрения ({e.code}): {e.read().decode('utf-8', 'replace')}\n"
                          f"Скачайте её: ollama pull {VISION_MODEL}")
     except urllib.error.URLError as e:
-        raise ai.AIError(f"Ollama не отвечает: {e.reason}")
+        raise ai.AIError(f"Ollama не отвечает: {e.reason}", fatal=True)
 
 
 def duration(path):
@@ -192,7 +192,12 @@ def main():
         sys.exit("Фото, видео или аудио не найдено.")
     print(f"Найдено медиафайлов: {len(media)}", file=sys.stderr)
 
+    other = len(files) - len(media)
+    if other:
+        print(f"Не медиафайлов пропущено: {other} (их загружает ai.py learn)", file=sys.stderr)
+
     done = skipped = 0
+    failed = []
     with tempfile.TemporaryDirectory() as tmp:
         for n, path in enumerate(media, 1):
             if not force and already_loaded(path):
@@ -200,16 +205,27 @@ def main():
                 continue
             ext = os.path.splitext(path)[1].lower()
             print(f"[{n}/{len(media)}] {path}", file=sys.stderr)
-            if ext in IMG_EXT:
-                text = process_image(path, tmp)
-            elif ext in VID_EXT:
-                text = process_video(path, tmp)
-            else:
-                text = process_audio(path, tmp)
-            if text.strip():
+            try:
+                if ext in IMG_EXT:
+                    text = process_image(path, tmp)
+                elif ext in VID_EXT:
+                    text = process_video(path, tmp)
+                else:
+                    text = process_audio(path, tmp)
+                if not text.strip():
+                    failed.append((path, "не удалось извлечь содержимое"))
+                    continue
                 print(f"  сохранено частей: {store(path, text)}", file=sys.stderr)
                 done += 1
-    print(f"Готово: обработано {done}, пропущено как уже загруженные: {skipped}")
+            except ai.AIError as e:
+                if e.fatal:
+                    raise
+                failed.append((path, str(e).splitlines()[0]))
+            except Exception as e:  # один плохой файл не останавливает остальные
+                failed.append((path, f"ошибка: {e}"))
+    print(f"Готово: обработано {done}, уже были загружены: {skipped}, с ошибкой: {len(failed)}")
+    for path, why in failed:
+        print(f"  пропущен: {os.path.basename(path)} — {why}")
 
 
 if __name__ == "__main__":

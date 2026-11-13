@@ -51,11 +51,15 @@ def _post(path, payload, timeout=1800):
         body = e.read().decode("utf-8", "replace")
         raise AIError(f"Ошибка модели ({e.code}): {body}\nПроверьте, что модель скачана: ollama list")
     except urllib.error.URLError as e:
-        raise AIError(f"Не удалось подключиться к {BASE_URL}: {e.reason}\nПроверьте, что Ollama запущен: systemctl status ollama")
+        raise AIError(f"Не удалось подключиться к {BASE_URL}: {e.reason}\nПроверьте, что Ollama запущен: systemctl status ollama",
+                      fatal=True)
 
 
 class AIError(Exception):
-    pass
+    """fatal=True: модель недоступна вообще, продолжать бессмысленно."""
+    def __init__(self, msg, fatal=False):
+        super().__init__(msg)
+        self.fatal = fatal
 
 
 def embed(text):
@@ -143,23 +147,41 @@ def cmd_learn(target):
         sys.exit(f"Не найдено: {target}")
     con = db()
     added = 0
+    skipped = []
     for path in files:
         path = os.path.abspath(path)
-        text = read_file(path)
-        if text is None:
+        try:
+            text = read_file(path)
+            if text is None:
+                ext = os.path.splitext(path)[1].lower()
+                media = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".gif", ".mp4", ".mov", ".mkv",
+                         ".avi", ".webm", ".m4v", ".mp3", ".wav", ".m4a", ".ogg", ".flac", ".opus"}
+                why = "фото/видео/аудио: загружайте через ai_media.py" if ext in media else "тип не поддерживается"
+                skipped.append((path, why))
+                continue
+            if not text.strip():
+                skipped.append((path, "пустой или без текста"))
+                continue
+            parts = list(chunks(text))
+            rows = [(path, i, part, json.dumps(embed(part))) for i, part in enumerate(parts)]
+        except AIError as e:
+            if e.fatal:
+                con.close()
+                raise
+            skipped.append((path, str(e).splitlines()[0]))
             continue
-        if not text.strip():
+        except Exception as e:  # битый файл, нет прав и т.п. — пропускаем и идём дальше
+            skipped.append((path, f"ошибка чтения: {e}"))
             continue
         con.execute("DELETE FROM docs WHERE path = ?", (path,))  # повторная загрузка обновляет файл
-        parts = list(chunks(text))
-        print(f"  {path}  ({len(parts)} частей)", file=sys.stderr)
-        for i, part in enumerate(parts):
-            con.execute("INSERT INTO docs (path, part, text, embedding) VALUES (?, ?, ?, ?)",
-                        (path, i, part, json.dumps(embed(part))))
+        con.executemany("INSERT INTO docs (path, part, text, embedding) VALUES (?, ?, ?, ?)", rows)
         con.commit()
+        print(f"  {path}  ({len(parts)} частей)", file=sys.stderr)
         added += 1
     con.close()
-    print(f"Загружено файлов: {added}")
+    print(f"Загружено файлов: {added}, пропущено: {len(skipped)}")
+    for path, why in skipped:
+        print(f"  пропущен: {os.path.basename(path)} — {why}")
 
 
 def cmd_docs():

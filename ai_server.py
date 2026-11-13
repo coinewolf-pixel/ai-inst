@@ -107,7 +107,7 @@ PAGE = """<!DOCTYPE html>
  <p>Можно: тексты, код, PDF, фото (jpg, png, webp), видео (mp4, mov, mkv), аудио (mp3, wav, m4a).
  Фото и видео обрабатываются в фоне: на процессоре фото занимает минуты, видео дольше.</p>
  <input id="file" type="file" multiple><div class="row"><button id="up" class="grey">Загрузить</button></div>
- <div id="upinfo" class="meta"></div>
+ <div id="upinfo" class="meta" style="white-space:pre-wrap"></div>
  <div id="jobs" class="meta" style="white-space:pre-wrap"></div>
 </details>
 <script>
@@ -141,14 +141,18 @@ $("up").onclick=async()=>{
   const files=[...$("file").files]; if(!files.length) return;
   if(!$("key").value.trim()){ $("upinfo").textContent="Сначала введите пароль в верхнее поле"; return; }
   $("up").disabled=true;
-  for(const f of files){
-    $("upinfo").textContent="Отправляю "+f.name+"...";
+  const log=[]; const show=()=>{$("upinfo").textContent=log.join("\n");};
+  let okN=0, badN=0;
+  for(const [i,f] of files.entries()){
+    log.push(f.name+": отправляю..."); show();
     try{
       const data=await new Promise((ok,bad)=>{const r=new FileReader();r.onload=()=>ok(String(r.result).split(",")[1]||"");r.onerror=()=>bad(new Error("не удалось прочитать файл"));r.readAsDataURL(f);});
       await api("/api/upload",{name:f.name,data});
-      $("upinfo").textContent=f.name+": принят, обрабатывается";
-    }catch(e){ $("upinfo").textContent=f.name+": "+e.message; }
+      log[log.length-1]=f.name+": принят"; okN++;
+    }catch(e){ log[log.length-1]=f.name+": пропущен — "+e.message; badN++; }
+    show();
   }
+  log.push("Итого: принято "+okN+", пропущено "+badN); show();
   $("up").disabled=false; jobs();
 };
 async function jobs(){

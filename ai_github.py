@@ -41,6 +41,10 @@ def parse_url(url):
     return m.group(1), m.group(2)
 
 
+class RepoError(Exception):
+    """Ошибка с одним репозиторием: его пропускаем, остальные продолжаем."""
+
+
 def git(*args, cwd=None):
     auth = []
     if TOKEN:  # токен передаётся только в заголовке, на диск не сохраняется
@@ -51,8 +55,10 @@ def git(*args, cwd=None):
                            env={**os.environ, "GIT_TERMINAL_PROMPT": "0"})
     except FileNotFoundError:
         sys.exit("Не установлен git: sudo apt install -y git")
+    except subprocess.TimeoutExpired:
+        raise RepoError("git не уложился в 15 минут (слишком большой репозиторий или медленная сеть)")
     if r.returncode != 0:
-        sys.exit("Ошибка git: " + (r.stderr.strip() or r.stdout.strip()))
+        raise RepoError("ошибка git: " + (r.stderr.strip() or r.stdout.strip())[-300:])
     return r.stdout
 
 
@@ -85,21 +91,33 @@ def learn_repo(path):
     con.execute("DELETE FROM docs WHERE path LIKE ?", (path + os.sep + "%",))  # убрать старую версию репо
     con.commit()
     added = 0
+    failed = []
     for n, p in enumerate(files, 1):
-        text = ai.read_file(p)
-        if not text or not text.strip():
-            continue
         rel = os.path.relpath(p, path)
-        parts = list(ai.chunks(text))
-        for i, part in enumerate(parts):
+        try:
+            text = ai.read_file(p)
+            if not text or not text.strip():
+                continue
+            parts = list(ai.chunks(text))
             # имя файла в начале куска помогает поиску понять, откуда код
-            con.execute("INSERT INTO docs (path, part, text, embedding) VALUES (?, ?, ?, ?)",
-                        (p, i, part, ai.json.dumps(ai.embed(f"{rel}\n{part}"))))
+            rows = [(p, i, part, ai.json.dumps(ai.embed(f"{rel}\n{part}"))) for i, part in enumerate(parts)]
+        except ai.AIError as e:
+            if e.fatal:
+                con.close()
+                raise
+            failed.append((rel, str(e).splitlines()[0]))
+            continue
+        except Exception as e:  # битый файл не останавливает остальные
+            failed.append((rel, f"ошибка: {e}"))
+            continue
+        con.executemany("INSERT INTO docs (path, part, text, embedding) VALUES (?, ?, ?, ?)", rows)
         con.commit()
         added += 1
         print(f"  [{n}/{len(files)}] {rel}  ({len(parts)} частей)", file=sys.stderr)
     con.close()
-    print(f"Готово: в базу добавлено файлов: {added}")
+    print(f"Готово: в базу добавлено файлов: {added}, с ошибкой: {len(failed)}")
+    for rel, why in failed:
+        print(f"  пропущен: {rel} — {why}")
 
 
 def user_repos(user):
@@ -137,9 +155,22 @@ def cmd_user(user):
     if not repos:
         sys.exit("Репозиториев не найдено (форки и архивные пропускаются).")
     print(f"Найдено репозиториев: {len(repos)}", file=sys.stderr)
+    many(repos)
+
+
+def many(repos):
+    """Обрабатывает список репозиториев; неудачные пропускает и показывает в конце."""
+    failed = []
     for n, (owner, name) in enumerate(repos, 1):
         print(f"\n=== [{n}/{len(repos)}] {owner}/{name} ===", file=sys.stderr)
-        learn_repo(fetch(owner, name))
+        try:
+            learn_repo(fetch(owner, name))
+        except RepoError as e:
+            print(f"  пропущен: {e}", file=sys.stderr)
+            failed.append((f"{owner}/{name}", str(e)))
+    print(f"\nИтого репозиториев: {len(repos)}, успешно: {len(repos) - len(failed)}, пропущено: {len(failed)}")
+    for repo, why in failed:
+        print(f"  пропущен: {repo} — {why[:200]}")
 
 
 def cmd_list():
@@ -159,11 +190,12 @@ def main():
     elif len(a) == 1 and a[0] == "update":
         if not os.path.isdir(REPO_DIR):
             sys.exit("Репозитории пока не скачаны.")
-        for d in sorted(os.listdir(REPO_DIR)):
-            owner, name = d.split("__", 1)
-            learn_repo(fetch(owner, name))
+        many([tuple(d.split("__", 1)) for d in sorted(os.listdir(REPO_DIR)) if "__" in d])
     elif len(a) == 1:
-        learn_repo(fetch(*parse_url(a[0])))
+        try:
+            learn_repo(fetch(*parse_url(a[0])))
+        except RepoError as e:
+            sys.exit(str(e))
     else:
         print(__doc__)
 
