@@ -141,7 +141,7 @@ $("up").onclick=async()=>{
   const files=[...$("file").files]; if(!files.length) return;
   if(!$("key").value.trim()){ $("upinfo").textContent="Сначала введите пароль в верхнее поле"; return; }
   $("up").disabled=true;
-  const log=[]; const show=()=>{$("upinfo").textContent=log.join("\n");};
+  const log=[]; const show=()=>{$("upinfo").textContent=log.join("\\n");};
   let okN=0, badN=0;
   for(const [i,f] of files.entries()){
     log.push(f.name+": отправляю..."); show();
