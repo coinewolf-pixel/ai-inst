@@ -41,8 +41,11 @@ KEY = os.environ.get("AI_SERVER_KEY", "")
 MAX_BODY = 700 * 1024 * 1024  # до ~500 МБ файла (base64 раздувает размер на треть)
 UPLOAD_DIR = os.path.expanduser("~/znaniya/uploads")
 
-# Процессор тянет один запрос за раз: остальные ждут в очереди, а не тормозят друг друга.
-MODEL_LOCK = threading.Lock()
+# Две отдельные очереди. Вопросы в чате идут по одному, но не ждут фоновых задач:
+# генерация картинки при первом запуске качает модель десятки минут, и чат не должен
+# всё это время стоять. Фоновые задачи (картинки, видео, фото) тоже идут по одной.
+CHAT_LOCK = threading.Lock()
+BG_LOCK = threading.Lock()
 
 # Фоновая обработка фото и видео: она долгая, поэтому браузер не ждёт её окончания.
 JOBS = []          # [{"file": ..., "status": "в очереди" / "обрабатывается" / "готово" / "ошибка: ..."}]
@@ -50,11 +53,11 @@ JOBS_LOCK = threading.Lock()
 
 
 def run_generation(kind, payload, job):
-    """Создание картинки или видео в фоне. Очередь общая с моделью: процессор один."""
+    """Создание картинки или видео в фоне, в очереди фоновых задач (не мешает чату)."""
     try:
         import ai_image
         log = lambda m: set_job(job, "обрабатывается: " + m.strip()[:80])  # noqa: E731
-        with MODEL_LOCK:
+        with BG_LOCK:
             set_job(job, "обрабатывается")
             if kind == "image":
                 paths = ai_image.generate([payload], log)
@@ -80,7 +83,7 @@ def process_upload(path, job):
     import tempfile
     ext = os.path.splitext(path)[1].lower()
     try:
-        with MODEL_LOCK:
+        with BG_LOCK:
             set_job(job, "обрабатывается")
             if ext in ai.TEXT_EXT or ext == ".pdf":
                 text = ai.read_file(path) or ""
@@ -395,14 +398,13 @@ class Handler(BaseHTTPRequestHandler):
                 task = str(b.get("task", "")).strip()
                 if not task:
                     return self.send(400, {"error": "Пустая задача"})
-                with MODEL_LOCK:
+                with CHAT_LOCK:
                     return self.send(200, ai.solve(task))
             if self.path == "/api/save":
                 task, sol = str(b.get("task", "")).strip(), str(b.get("solution", "")).strip()
                 if not task or not sol:
                     return self.send(400, {"error": "Нужны task и solution"})
-                with MODEL_LOCK:
-                    ai.save(task, sol, str(b.get("source", "api")))
+                ai.save(task, sol, str(b.get("source", "api")))
                 return self.send(200, {"ok": True})
             if self.path == "/api/learn":
                 name = os.path.basename(str(b.get("name", "")).strip()) or "text.txt"
@@ -414,7 +416,7 @@ class Handler(BaseHTTPRequestHandler):
                 with open(path, "w", encoding="utf-8") as f:
                     f.write(text)
                 parts = list(ai.chunks(text))
-                with MODEL_LOCK:
+                if True:  # короткая операция, очередь не нужна
                     con = ai.db()
                     con.execute("DELETE FROM docs WHERE path = ?", (path,))
                     for i, part in enumerate(parts):
