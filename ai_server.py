@@ -139,6 +139,7 @@ $("send").onclick=async()=>{
 };
 $("up").onclick=async()=>{
   const files=[...$("file").files]; if(!files.length) return;
+  if(!$("key").value.trim()){ $("upinfo").textContent="Сначала введите пароль в верхнее поле"; return; }
   $("up").disabled=true;
   for(const f of files){
     $("upinfo").textContent="Отправляю "+f.name+"...";
@@ -178,13 +179,18 @@ class Handler(BaseHTTPRequestHandler):
         got = self.headers.get("Authorization", "")
         return bool(KEY) and hmac.compare_digest(got.encode(), ("Bearer " + KEY).encode())
 
-    def body(self):
+    def read_raw(self):
+        """Всегда дочитываем запрос до конца, иначе браузер увидит обрыв связи вместо ошибки."""
         n = int(self.headers.get("Content-Length") or 0)
         if n > MAX_BODY:
-            raise ValueError("Слишком большой запрос (больше 20 МБ)")
+            self.close_connection = True
+            return None
+        return self.rfile.read(n)
+
+    def body(self):
         try:
-            return json.loads(self.rfile.read(n).decode("utf-8") or "{}")
-        except json.JSONDecodeError:
+            return json.loads(self._raw.decode("utf-8") or "{}")
+        except (json.JSONDecodeError, UnicodeDecodeError):
             raise ValueError("Тело запроса должно быть JSON")
 
     def do_GET(self):
@@ -207,8 +213,11 @@ class Handler(BaseHTTPRequestHandler):
         self.send(404, {"error": "Нет такого адреса"})
 
     def do_POST(self):
+        self._raw = self.read_raw()
+        if self._raw is None:
+            return self.send(413, {"error": "Файл слишком большой (больше 500 МБ)"})
         if not self.authorized():
-            return self.send(401, {"error": "Неверный ключ"})
+            return self.send(401, {"error": "Неверный ключ: введите пароль в верхнее поле"})
         try:
             b = self.body()
             if self.path == "/api/ask":
