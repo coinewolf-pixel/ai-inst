@@ -40,11 +40,17 @@ VID_EXT = {".mp4", ".mov", ".mkv", ".avi", ".webm", ".m4v"}
 AUD_EXT = {".mp3", ".wav", ".m4a", ".ogg", ".flac", ".opus"}
 
 PHOTO_PROMPT = (
-    "Опиши это изображение подробно на русском языке: что и кто изображён, обстановка, "
-    "предметы, цвета, действия. Если на изображении есть текст, перепиши его дословно. "
-    "Если это скриншот программы или код, опиши, что на экране."
+    "Это изображение из личного архива владельца, он сам загрузил его в свою базу знаний, "
+    "чтобы потом находить по описанию. Составь каталожную запись на русском языке:\n"
+    "1. Что изображено: люди, предметы, обстановка, цвета, действия.\n"
+    "2. Распознанный текст: все надписи, которые видны на изображении (это обычное распознавание "
+    "текста, OCR, для поиска по архиву владельца).\n"
+    "3. Если это скриншот, документ или код, кратко опиши, что на нём."
 )
-FRAME_PROMPT = "Кратко опиши на русском, что происходит на этом кадре видео. Если есть текст, перепиши его."
+FRAME_PROMPT = (
+    "Это кадр из личного видео владельца для его поискового архива. Кратко опиши на русском, "
+    "что происходит, и перечисли видимые надписи, если они есть."
+)
 
 WHISPER_CODE = r"""
 import sys
@@ -99,6 +105,21 @@ def look(jpeg_path, prompt):
         raise ai.AIError(f"Ollama не отвечает: {e.reason}", fatal=True)
 
 
+REFUSAL_MARKERS = ("не могу", "извините", "не имею возможности", "авторск", "i can't", "i cannot", "sorry")
+SIMPLE_PROMPT = "Что изображено на этой картинке? Опиши на русском и перечисли надписи, если они есть."
+
+
+def look_safe(jpeg_path, prompt):
+    """Если маленькая модель зря отказалась, повторяем запрос в простой форме."""
+    text = look(jpeg_path, prompt)
+    if any(m in text.lower()[:200] for m in REFUSAL_MARKERS):
+        print("  модель отказалась, пробую проще...", file=sys.stderr)
+        text = look(jpeg_path, SIMPLE_PROMPT)
+        if any(m in text.lower()[:200] for m in REFUSAL_MARKERS):
+            return ""
+    return text
+
+
 def duration(path):
     r = run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", path])
     try:
@@ -130,7 +151,8 @@ def process_image(path, tmp):
     if not to_small_jpeg(path, small):
         print("  не удалось открыть картинку, пропускаю", file=sys.stderr)
         return ""
-    return f"Фото: {os.path.basename(path)}\n\n{look(small, PHOTO_PROMPT)}"
+    desc = look_safe(small, PHOTO_PROMPT)
+    return f"Фото: {os.path.basename(path)}\n\n{desc}" if desc else ""
 
 
 def process_video(path, tmp):
@@ -141,7 +163,9 @@ def process_video(path, tmp):
         frame = os.path.join(tmp, f"f{n}.jpg")
         if to_small_jpeg(path, frame, seek=t):
             print(f"  кадр {n}/{len(times)} ({ts(t)})", file=sys.stderr)
-            lines.append(f"[{ts(t)}] {look(frame, FRAME_PROMPT)}")
+            desc = look_safe(frame, FRAME_PROMPT)
+            if desc:
+                lines.append(f"[{ts(t)}] {desc}")
     speech = transcribe(path)
     if speech:
         lines += ["", "Речь в видео:", speech]
