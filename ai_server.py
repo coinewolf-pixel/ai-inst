@@ -14,6 +14,9 @@ API (ключ передаётся в заголовке  Authorization: Bearer 
   POST /api/learn    {"name": "файл.txt", "text": "..."}  -> добавить текст в базу знаний
   POST /api/upload   {"name": "фото.jpg", "data": "base64"} -> любой файл: текст, PDF, фото, видео, аудио
   GET  /api/jobs                                          -> что сейчас обрабатывается в фоне
+  POST /api/image    {"prompt": "кот в космосе"}          -> создать картинку (в фоне)
+  POST /api/video    {"scenes": ["сцена 1", "сцена 2"]}   -> видео-слайдшоу по сценарию (в фоне)
+  GET  /files/имя                                         -> скачать созданную картинку или видео
   GET  /api/docs                                          -> список загруженных файлов
   GET  /api/health                                        -> проверка, что сервер жив (без ключа)
 """
@@ -39,6 +42,27 @@ MODEL_LOCK = threading.Lock()
 # Фоновая обработка фото и видео: она долгая, поэтому браузер не ждёт её окончания.
 JOBS = []          # [{"file": ..., "status": "в очереди" / "обрабатывается" / "готово" / "ошибка: ..."}]
 JOBS_LOCK = threading.Lock()
+
+
+def run_generation(kind, payload, job):
+    """Создание картинки или видео в фоне. Очередь общая с моделью: процессор один."""
+    try:
+        import ai_image
+        log = lambda m: set_job(job, "обрабатывается: " + m.strip()[:80])  # noqa: E731
+        with MODEL_LOCK:
+            set_job(job, "обрабатывается")
+            if kind == "image":
+                paths = ai_image.generate([payload], log)
+                if not paths:
+                    return set_job(job, "ошибка: картинка не получилась")
+                path = paths[0]
+            else:
+                path = ai_image.make_video(payload, log)
+        with JOBS_LOCK:
+            job["status"] = "готово"
+            job["url"] = "/files/" + os.path.basename(path)
+    except Exception as e:  # ImageError, нет ffmpeg и т.п.
+        set_job(job, f"ошибка: {e}")
 
 
 def set_job(job, status):
@@ -103,6 +127,13 @@ PAGE = """<!DOCTYPE html>
 <div id="chat"></div>
 <textarea id="task" placeholder="Напишите задачу..."></textarea>
 <div class="row"><button id="send">Отправить</button></div>
+<details><summary>Создать картинку или видео</summary>
+ <p>Картинка: опишите, что нарисовать. Видео: каждая строка — отдельная сцена, получится слайдшоу с подписями.
+ На процессоре картинка делается от 15 секунд до пары минут, первый раз дольше (скачивается модель).</p>
+ <textarea id="gen" placeholder="Например: рыжий кот сидит на подоконнике, за окном дождь, акварель"></textarea>
+ <div class="row"><button id="mkimg" class="grey">Создать картинку</button><button id="mkvid" class="grey">Создать видео по строкам</button></div>
+ <div id="geninfo" class="meta"></div>
+</details>
 <details><summary>Добавить файл в базу знаний</summary>
  <p>Можно: тексты, код, PDF, фото (jpg, png, webp), видео (mp4, mov, mkv), аудио (mp3, wav, m4a).
  Фото и видео обрабатываются в фоне: на процессоре фото занимает минуты, видео дольше.</p>
@@ -155,12 +186,30 @@ $("up").onclick=async()=>{
   log.push("Итого: принято "+okN+", пропущено "+badN); show();
   $("up").disabled=false; jobs();
 };
+async function gen(kind){
+  const t=$("gen").value.trim(); if(!t){ $("geninfo").textContent="Сначала напишите описание"; return; }
+  if(!$("key").value.trim()){ $("geninfo").textContent="Сначала введите пароль в верхнее поле"; return; }
+  const body=kind==="image"?{prompt:t}:{scenes:t.split(String.fromCharCode(10)).filter(x=>x.trim())};
+  try{ await api("/api/"+kind,body); $("geninfo").textContent="Принято, смотрите список ниже. Можно закрыть страницу."; jobs(); }
+  catch(e){ $("geninfo").textContent=e.message; }
+}
+$("mkimg").onclick=()=>gen("image");
+$("mkvid").onclick=()=>gen("video");
 async function jobs(){
   try{
     const r=await fetch("/api/jobs",{headers:hdr()}); if(!r.ok) return;
     const j=await r.json();
-    $("jobs").textContent=j.jobs.slice(-10).reverse().map(x=>x.file+" — "+x.status).join("\\n");
-    if(j.jobs.some(x=>x.status==="в очереди"||x.status==="обрабатывается")) setTimeout(jobs,5000);
+    const box=$("jobs"); box.textContent="";
+    for(const x of j.jobs.slice(-10).reverse()){
+      const d=document.createElement("div"); d.textContent=x.file+" — "+x.status;
+      if(x.url){
+        const a=document.createElement("a"); a.href=x.url; a.target="_blank"; a.textContent=" открыть";
+        d.appendChild(a);
+        if(x.url.endsWith(".png")){ const im=document.createElement("img"); im.src=x.url; im.style.cssText="display:block;max-width:256px;border-radius:8px;margin:6px 0"; d.appendChild(im); }
+      }
+      box.appendChild(d);
+    }
+    if(j.jobs.some(x=>x.status==="в очереди"||x.status.startsWith("обрабатывается"))) setTimeout(jobs,5000);
   }catch(e){}
 }
 jobs();
@@ -209,6 +258,22 @@ class Handler(BaseHTTPRequestHandler):
             rows = con.execute("SELECT path, COUNT(*) FROM docs GROUP BY path ORDER BY path").fetchall()
             con.close()
             return self.send(200, {"docs": [{"file": p, "parts": n} for p, n in rows]})
+        if self.path.startswith("/files/"):
+            import ai_image
+            name = os.path.basename(self.path[len("/files/"):])
+            path = os.path.join(ai_image.OUT_DIR, name)
+            if not name or not os.path.isfile(path):
+                return self.send(404, {"error": "Файл не найден"})
+            ctype = "image/png" if name.endswith(".png") else "video/mp4" if name.endswith(".mp4") \
+                else "application/octet-stream"
+            with open(path, "rb") as f:
+                data = f.read()
+            self.send_response(200)
+            self.send_header("Content-Type", ctype)
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+            return
         if self.path == "/api/jobs":
             if not self.authorized():
                 return self.send(401, {"error": "Неверный ключ"})
@@ -256,6 +321,23 @@ class Handler(BaseHTTPRequestHandler):
                     con.commit()
                     con.close()
                 return self.send(200, {"ok": True, "parts": len(parts)})
+            if self.path in ("/api/image", "/api/video"):
+                kind = self.path.rsplit("/", 1)[1]
+                if kind == "image":
+                    payload = str(b.get("prompt", "")).strip()
+                    if not payload:
+                        return self.send(400, {"error": "Пустое описание"})
+                    title = "картинка: " + payload[:40]
+                else:
+                    payload = [str(x) for x in (b.get("scenes") or []) if str(x).strip()]
+                    if not payload:
+                        return self.send(400, {"error": "Нет сцен"})
+                    title = f"видео: {len(payload)} сцен"
+                job = {"file": title, "status": "в очереди"}
+                with JOBS_LOCK:
+                    JOBS.append(job)
+                threading.Thread(target=run_generation, args=(kind, payload, job), daemon=True).start()
+                return self.send(200, {"ok": True})
             if self.path == "/api/upload":
                 import base64
                 import binascii
