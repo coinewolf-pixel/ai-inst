@@ -8,6 +8,7 @@ ai.py — локальный AI с памятью решённых задач.
   python3 ai.py list                       показать, что лежит в памяти
   python3 ai.py learn папка_или_файл       загрузить ваши файлы в базу знаний
   python3 ai.py docs                       показать, какие файлы загружены
+  python3 ai.py clean                      удалить из базы сохранённые отказы модели
 
 Нужен только Python 3 и запущенный Ollama. Для PDF нужен pdftotext:
   sudo apt install -y poppler-utils
@@ -194,16 +195,29 @@ def cmd_docs():
         print(f"{n:5} частей  {path}")
 
 
+REFUSAL_MARKERS = ("не могу помочь", "не могу повторять", "не могу создавать", "не могу выполнить",
+                   "извините, но я не могу", "я не могу помочь", "i can't help", "i cannot help",
+                   "i'm sorry, but", "нарушать авторские")
+
+
+def is_refusal(text):
+    """Похоже ли начало текста на отказ модели."""
+    head = (text or "").lower()[:300]
+    return any(m in head for m in REFUSAL_MARKERS)
+
+
 def search_docs(q_emb):
     con = db()
     rows = con.execute("SELECT path, text, embedding FROM docs").fetchall()
     con.close()
-    scored = [(cosine(q_emb, json.loads(e)), p, t) for p, t, e in rows]
+    scored = [(cosine(q_emb, json.loads(e)), p, t) for p, t, e in rows if not is_refusal(t)]
     scored.sort(key=lambda r: r[0], reverse=True)
     return [r for r in scored[:TOP_K] if r[0] >= MIN_SIMILARITY]
 
 
 def save(task, solution, source):
+    if is_refusal(solution):
+        return False  # отказ модели в память не сохраняем: он испортит будущие ответы
     con = db()
     con.execute(
         "INSERT INTO memory (task, solution, source, embedding) VALUES (?, ?, ?, ?)",
@@ -220,18 +234,30 @@ def search(task):
     if not rows:
         return []
     q = embed(task)
-    scored = [(cosine(q, json.loads(e)), t, s) for t, s, e in rows]
+    scored = [(cosine(q, json.loads(e)), t, s) for t, s, e in rows if not is_refusal(s)]
     scored.sort(key=lambda r: r[0], reverse=True)
     return [r for r in scored[:TOP_K] if r[0] >= MIN_SIMILARITY]
+
+
+BASE_SYSTEM = (
+    "Ты личный AI-помощник владельца этого сервера и опытный разработчик. Ты работаешь локально, "
+    "на его собственном компьютере. Отвечай точно и по делу, на языке вопроса, код давай целиком.\n\n"
+    "Что ты умеешь (если спросят о твоих возможностях, расскажи об этом):\n"
+    "- писать, объяснять и исправлять код на любых языках, помогать с серверами и Linux;\n"
+    "- отвечать на вопросы по личной базе знаний владельца: документам, PDF, коду из его репозиториев "
+    "GitHub, описаниям его фото и видео, расшифровкам аудио;\n"
+    "- запоминать удачные решения и использовать их как образец в следующий раз;\n"
+    "- писать тексты, планы, сценарии для видео.\n"
+    "Сам ты картинки не рисуешь: для этого на странице чата есть раздел «Создать картинку или видео».\n\n"
+    "Материалы ниже — собственные файлы, фото и код владельца, которые он сам загрузил: "
+    "ты можешь свободно цитировать и пересказывать их ему."
+)
 
 
 def solve(task):
     """Ответ на задачу с учётом памяти и файлов. Возвращает словарь (используется и сервером)."""
     found = search(task)
-    system = ("Ты личный помощник владельца этого сервера и опытный разработчик. "
-              "Отвечай точно и по делу, на языке вопроса, код давай целиком. "
-              "Материалы ниже — собственные файлы, фото и код владельца, которые он сам загрузил: "
-              "ты можешь свободно цитировать и пересказывать их ему.")
+    system = BASE_SYSTEM
     if found:
         examples = "\n\n".join(
             f"--- Задача ---\n{t}\n--- Решение ---\n{s[:MAX_EXAMPLE_CHARS]}" for _, t, s in found
@@ -245,6 +271,10 @@ def solve(task):
         ctx = "\n\n".join(f"--- Из файла {os.path.basename(p)} ---\n{t}" for _, p, t in docs)
         system += "\n\nСведения из личных файлов владельца, опирайся на них:\n\n" + ctx
     answer = chat([{"role": "system", "content": system}, {"role": "user", "content": task}])
+    if is_refusal(answer) and (found or docs):
+        # отказ мог вызвать неудачный кусок из базы — пробуем ещё раз без него
+        answer = chat([{"role": "system", "content": BASE_SYSTEM}, {"role": "user", "content": task}])
+        found, docs = [], []
     return {
         "answer": answer,
         "memory": [{"score": round(s, 2), "task": t[:200]} for s, t, _ in found],
@@ -290,6 +320,18 @@ def cmd_list():
     print(f"\nВсего записей: {len(rows)}. Файл базы: {DB_PATH}")
 
 
+def cmd_clean():
+    """Удаляет из базы сохранённые отказы модели: они портят будущие ответы."""
+    con = db()
+    mem = [i for i, sol in con.execute("SELECT id, solution FROM memory") if is_refusal(sol)]
+    doc = [i for i, t in con.execute("SELECT id, text FROM docs") if is_refusal(t)]
+    con.executemany("DELETE FROM memory WHERE id = ?", [(i,) for i in mem])
+    con.executemany("DELETE FROM docs WHERE id = ?", [(i,) for i in doc])
+    con.commit()
+    con.close()
+    print(f"Удалено отказов: из памяти {len(mem)}, из базы файлов {len(doc)}")
+
+
 def main():
     a = sys.argv[1:]
     if len(a) == 2 and a[0] == "ask":
@@ -302,6 +344,8 @@ def main():
         cmd_learn(a[1])
     elif len(a) == 1 and a[0] == "docs":
         cmd_docs()
+    elif len(a) == 1 and a[0] == "clean":
+        cmd_clean()
     else:
         print(__doc__)
 
