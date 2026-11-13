@@ -9,6 +9,7 @@ ai.py — локальный AI с памятью решённых задач.
   python3 ai.py learn папка_или_файл       загрузить ваши файлы в базу знаний
   python3 ai.py docs                       показать, какие файлы загружены
   python3 ai.py clean                      удалить из базы сохранённые отказы модели
+  python3 ai.py forget часть_имени         убрать из базы файлы, в имени которых есть этот текст
 
 Нужен только Python 3 и запущенный Ollama. Для PDF нужен pdftotext:
   sudo apt install -y poppler-utils
@@ -34,7 +35,7 @@ CHAT_MODEL = os.environ.get("AI_CHAT_MODEL", "qwen2.5-coder:7b")       # мод�
 EMBED_MODEL = os.environ.get("AI_EMBED_MODEL", "nomic-embed-text")     # модель для поиска в памяти
 DB_PATH = os.environ.get("AI_DB", os.path.expanduser("~/ai_memory.db"))
 TOP_K = 3            # сколько похожих задач показывать модели
-MIN_SIMILARITY = 0.5  # ниже этого порога задача считается непохожей
+MIN_SIMILARITY = float(os.environ.get("AI_MIN_SIM", "0.62"))  # ниже этого порога файл считается не относящимся к вопросу
 MAX_EXAMPLE_CHARS = 3000  # обрезка длинных решений, чтобы не переполнить модель
 # -------------------------------
 
@@ -196,6 +197,7 @@ def cmd_docs():
 
 
 REFUSAL_MARKERS = ("не могу помочь", "не могу повторять", "не могу создавать", "не могу выполнить",
+                   "не могу давать", "не могу предоставить", "не могу обсуждать",
                    "извините, но я не могу", "я не могу помочь", "i can't help", "i cannot help",
                    "i'm sorry, but", "нарушать авторские")
 
@@ -320,6 +322,19 @@ def cmd_list():
     print(f"\nВсего записей: {len(rows)}. Файл базы: {DB_PATH}")
 
 
+def cmd_forget(pattern):
+    """Убирает из базы знаний файлы, в пути которых есть указанный текст."""
+    con = db()
+    paths = [p for (p,) in con.execute("SELECT DISTINCT path FROM docs") if pattern in p]
+    for p in paths:
+        con.execute("DELETE FROM docs WHERE path = ?", (p,))
+    con.commit()
+    con.close()
+    for p in paths:
+        print(f"  убран: {p}")
+    print(f"Убрано из базы файлов: {len(paths)} (сами файлы на диске не удалены)")
+
+
 def cmd_clean():
     """Удаляет из базы сохранённые отказы модели: они портят будущие ответы."""
     con = db()
@@ -346,6 +361,8 @@ def main():
         cmd_docs()
     elif len(a) == 1 and a[0] == "clean":
         cmd_clean()
+    elif len(a) == 2 and a[0] == "forget":
+        cmd_forget(a[1])
     else:
         print(__doc__)
 
