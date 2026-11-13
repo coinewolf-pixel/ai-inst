@@ -16,15 +16,20 @@ API (ключ передаётся в заголовке  Authorization: Bearer 
   GET  /api/jobs                                          -> что сейчас обрабатывается в фоне
   POST /api/image    {"prompt": "кот в космосе"}          -> создать картинку (в фоне)
   POST /api/video    {"scenes": ["сцена 1", "сцена 2"]}   -> видео-слайдшоу по сценарию (в фоне)
-  GET  /files/имя                                         -> скачать созданную картинку или видео
+  GET  /api/files                                         -> список созданных и загруженных файлов
+  GET  /files/имя[?download=1]                            -> открыть или скачать файл
+  (для /files пароль можно передать и cookie aikey — так работает страница в браузере)
   GET  /api/docs                                          -> список загруженных файлов
   GET  /api/health                                        -> проверка, что сервер жив (без ключа)
 """
 import hmac
 import json
+import mimetypes
 import os
 import sys
 import threading
+import urllib.parse
+from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -134,6 +139,10 @@ PAGE = """<!DOCTYPE html>
  <div class="row"><button id="mkimg" class="grey">Создать картинку</button><button id="mkvid" class="grey">Создать видео по строкам</button></div>
  <div id="geninfo" class="meta"></div>
 </details>
+<details id="filesbox"><summary>Мои файлы</summary>
+ <div class="row"><button id="reload" class="grey">Обновить список</button></div>
+ <div id="files" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px"></div>
+</details>
 <details><summary>Добавить файл в базу знаний</summary>
  <p>Можно: тексты, код, PDF, фото (jpg, png, webp), видео (mp4, mov, mkv), аудио (mp3, wav, m4a).
  Фото и видео обрабатываются в фоне: на процессоре фото занимает минуты, видео дольше.</p>
@@ -143,9 +152,11 @@ PAGE = """<!DOCTYPE html>
 </details>
 <script>
 const $=id=>document.getElementById(id);
+function setCookie(){ document.cookie="aikey="+encodeURIComponent($("key").value.trim())+"; path=/; max-age=31536000; SameSite=Strict"; }
 try{ $("key").value=localStorage.getItem("aikey")||""; }catch(e){}
-$("key").onchange=()=>{ try{localStorage.setItem("aikey",$("key").value)}catch(e){} };
-function hdr(){return {"Content-Type":"application/json","Authorization":"Bearer "+$("key").value};}
+setCookie();
+$("key").onchange=()=>{ try{localStorage.setItem("aikey",$("key").value)}catch(e){} setCookie(); files(); };
+function hdr(){return {"Content-Type":"application/json","Authorization":"Bearer "+encodeURIComponent($("key").value.trim())};}
 function add(text,cls){const d=document.createElement("div");d.className="msg "+(cls||"");d.textContent=text;$("chat").appendChild(d);d.scrollIntoView();return d;}
 async function api(path,body){
   const r=await fetch(path,{method:"POST",headers:hdr(),body:JSON.stringify(body)});
@@ -195,6 +206,33 @@ async function gen(kind){
 }
 $("mkimg").onclick=()=>gen("image");
 $("mkvid").onclick=()=>gen("video");
+function human(n){ return n>1048576?(n/1048576).toFixed(1)+" МБ":Math.max(1,Math.round(n/1024))+" КБ"; }
+async function files(){
+  const box=$("files");
+  try{
+    const r=await fetch("/api/files",{headers:hdr()});
+    if(!r.ok){ box.textContent="Введите пароль в верхнее поле, чтобы увидеть файлы"; return; }
+    const j=await r.json(); box.textContent="";
+    if(!j.files.length){ box.textContent="Пока пусто"; return; }
+    for(const f of j.files){
+      const c=document.createElement("div"); c.className="msg"; c.style.cssText="margin:0;padding:8px;font-size:12px;overflow:hidden";
+      if(/[.](png|jpe?g|webp|gif|bmp)$/i.test(f.name)){
+        const im=document.createElement("img"); im.src=f.url; im.loading="lazy";
+        im.style.cssText="width:100%;height:120px;object-fit:cover;border-radius:6px;display:block"; c.appendChild(im);
+      } else if(/[.](mp4|webm|mov)$/i.test(f.name)){
+        const v=document.createElement("video"); v.src=f.url; v.controls=true; v.preload="metadata";
+        v.style.cssText="width:100%;height:120px;border-radius:6px;display:block;background:#000"; c.appendChild(v);
+      }
+      const t=document.createElement("div"); t.textContent=f.name; t.style.cssText="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:4px"; c.appendChild(t);
+      const m=document.createElement("div"); m.className="meta"; m.textContent=f.kind+", "+human(f.size); c.appendChild(m);
+      const o=document.createElement("a"); o.href=f.url; o.target="_blank"; o.textContent="открыть";
+      const dl=document.createElement("a"); dl.href=f.url+"?download=1"; dl.textContent="скачать"; dl.style.marginLeft="10px";
+      c.appendChild(o); c.appendChild(dl); box.appendChild(c);
+    }
+  }catch(e){ box.textContent="Не удалось загрузить список: "+e.message; }
+}
+$("reload").onclick=files;
+$("filesbox").addEventListener("toggle",()=>{ if($("filesbox").open) files(); });
 async function jobs(){
   try{
     const r=await fetch("/api/jobs",{headers:hdr()}); if(!r.ok) return;
@@ -204,12 +242,14 @@ async function jobs(){
       const d=document.createElement("div"); d.textContent=x.file+" — "+x.status;
       if(x.url){
         const a=document.createElement("a"); a.href=x.url; a.target="_blank"; a.textContent=" открыть";
-        d.appendChild(a);
+        const dl=document.createElement("a"); dl.href=x.url+"?download=1"; dl.textContent=" скачать";
+        d.appendChild(a); d.appendChild(dl);
         if(x.url.endsWith(".png")){ const im=document.createElement("img"); im.src=x.url; im.style.cssText="display:block;max-width:256px;border-radius:8px;margin:6px 0"; d.appendChild(im); }
       }
       box.appendChild(d);
     }
     if(j.jobs.some(x=>x.status==="в очереди"||x.status.startsWith("обрабатывается"))) setTimeout(jobs,5000);
+    else if($("filesbox").open) files();
   }catch(e){}
 }
 jobs();
@@ -229,8 +269,66 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(data)
 
     def authorized(self):
+        if not KEY:
+            return False
         got = self.headers.get("Authorization", "")
-        return bool(KEY) and hmac.compare_digest(got.encode(), ("Bearer " + KEY).encode())
+        if got.startswith("Bearer "):
+            token = got[7:]
+            variants = {token, urllib.parse.unquote(token)}
+            try:  # пароль русскими буквами, отправленный curl'ом без кодирования
+                variants.add(token.encode("latin-1").decode("utf-8"))
+            except (UnicodeEncodeError, UnicodeDecodeError):
+                pass
+            if any(hmac.compare_digest(v.encode(), KEY.encode()) for v in variants):
+                return True
+        # браузер не умеет добавлять заголовок к <img> и ссылкам, поэтому страница кладёт пароль в cookie
+        try:
+            c = SimpleCookie(self.headers.get("Cookie", ""))
+            val = urllib.parse.unquote(c["aikey"].value) if "aikey" in c else ""
+        except Exception:
+            val = ""
+        return bool(val) and hmac.compare_digest(val.encode(), KEY.encode())
+
+    def file_dirs(self):
+        import ai_image
+        return [("создано", ai_image.OUT_DIR), ("загружено", UPLOAD_DIR)]
+
+    def serve_file(self, name, download):
+        for _, d in self.file_dirs():
+            path = os.path.join(d, name)
+            if name and os.path.isfile(path):
+                break
+        else:
+            return self.send(404, {"error": "Файл не найден"})
+        size = os.path.getsize(path)
+        self.send_response(200)
+        self.send_header("Content-Type", mimetypes.guess_type(name)[0] or "application/octet-stream")
+        self.send_header("Content-Length", str(size))
+        self.send_header("Cache-Control", "private, max-age=3600")
+        if download:
+            self.send_header("Content-Disposition",
+                             "attachment; filename*=UTF-8''" + urllib.parse.quote(name))
+        self.end_headers()
+        with open(path, "rb") as f:  # кусками, чтобы большое видео не занимало всю память
+            while True:
+                chunk = f.read(1024 * 1024)
+                if not chunk:
+                    break
+                self.wfile.write(chunk)
+
+    def list_files(self):
+        items = []
+        for kind, d in self.file_dirs():
+            if not os.path.isdir(d):
+                continue
+            for name in os.listdir(d):
+                path = os.path.join(d, name)
+                if os.path.isfile(path):
+                    items.append({"name": name, "kind": kind, "size": os.path.getsize(path),
+                                  "mtime": os.path.getmtime(path),
+                                  "url": "/files/" + urllib.parse.quote(name)})
+        items.sort(key=lambda x: x["mtime"], reverse=True)
+        return items[:200]
 
     def read_raw(self):
         """Всегда дочитываем запрос до конца, иначе браузер увидит обрыв связи вместо ошибки."""
@@ -247,6 +345,9 @@ class Handler(BaseHTTPRequestHandler):
             raise ValueError("Тело запроса должно быть JSON")
 
     def do_GET(self):
+        parsed = urllib.parse.urlsplit(self.path)
+        self.path = parsed.path
+        query = urllib.parse.parse_qs(parsed.query)
         if self.path in ("/", "/index.html"):
             return self.send(200, html=PAGE)
         if self.path == "/api/health":
@@ -259,21 +360,14 @@ class Handler(BaseHTTPRequestHandler):
             con.close()
             return self.send(200, {"docs": [{"file": p, "parts": n} for p, n in rows]})
         if self.path.startswith("/files/"):
-            import ai_image
-            name = os.path.basename(self.path[len("/files/"):])
-            path = os.path.join(ai_image.OUT_DIR, name)
-            if not name or not os.path.isfile(path):
-                return self.send(404, {"error": "Файл не найден"})
-            ctype = "image/png" if name.endswith(".png") else "video/mp4" if name.endswith(".mp4") \
-                else "application/octet-stream"
-            with open(path, "rb") as f:
-                data = f.read()
-            self.send_response(200)
-            self.send_header("Content-Type", ctype)
-            self.send_header("Content-Length", str(len(data)))
-            self.end_headers()
-            self.wfile.write(data)
-            return
+            if not self.authorized():
+                return self.send(401, {"error": "Неверный ключ: введите пароль на главной странице"})
+            name = os.path.basename(urllib.parse.unquote(self.path[len("/files/"):]))
+            return self.serve_file(name, query.get("download") == ["1"])
+        if self.path == "/api/files":
+            if not self.authorized():
+                return self.send(401, {"error": "Неверный ключ"})
+            return self.send(200, {"files": self.list_files()})
         if self.path == "/api/jobs":
             if not self.authorized():
                 return self.send(401, {"error": "Неверный ключ"})
