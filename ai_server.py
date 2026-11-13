@@ -141,7 +141,11 @@ PAGE = """<!DOCTYPE html>
 </details>
 <details id="filesbox"><summary>Мои файлы</summary>
  <div class="row"><button id="reload" class="grey">Обновить список</button></div>
- <div id="files" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px"></div>
+ <div id="filesmsg" class="meta"></div>
+ <h3 style="font-size:15px;margin:12px 0 6px">Создано AI</h3>
+ <div id="fgen" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px"></div>
+ <h3 style="font-size:15px;margin:16px 0 6px">Загружено вами</h3>
+ <div id="fup" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px"></div>
 </details>
 <details><summary>Добавить файл в базу знаний</summary>
  <p>Можно: тексты, код, PDF, фото (jpg, png, webp), видео (mp4, mov, mkv), аудио (mp3, wav, m4a).
@@ -207,14 +211,7 @@ async function gen(kind){
 $("mkimg").onclick=()=>gen("image");
 $("mkvid").onclick=()=>gen("video");
 function human(n){ return n>1048576?(n/1048576).toFixed(1)+" МБ":Math.max(1,Math.round(n/1024))+" КБ"; }
-async function files(){
-  const box=$("files");
-  try{
-    const r=await fetch("/api/files",{headers:hdr()});
-    if(!r.ok){ box.textContent="Введите пароль в верхнее поле, чтобы увидеть файлы"; return; }
-    const j=await r.json(); box.textContent="";
-    if(!j.files.length){ box.textContent="Пока пусто"; return; }
-    for(const f of j.files){
+function card(f){
       const c=document.createElement("div"); c.className="msg"; c.style.cssText="margin:0;padding:8px;font-size:12px;overflow:hidden";
       if(/[.](png|jpe?g|webp|gif|bmp)$/i.test(f.name)){
         const im=document.createElement("img"); im.src=f.url; im.loading="lazy";
@@ -227,9 +224,20 @@ async function files(){
       const m=document.createElement("div"); m.className="meta"; m.textContent=f.kind+", "+human(f.size); c.appendChild(m);
       const o=document.createElement("a"); o.href=f.url; o.target="_blank"; o.textContent="открыть";
       const dl=document.createElement("a"); dl.href=f.url+"?download=1"; dl.textContent="скачать"; dl.style.marginLeft="10px";
-      c.appendChild(o); c.appendChild(dl); box.appendChild(c);
-    }
-  }catch(e){ box.textContent="Не удалось загрузить список: "+e.message; }
+      c.appendChild(o); c.appendChild(dl); return c;
+}
+async function files(){
+  const msg=$("filesmsg"), gen=$("fgen"), up=$("fup");
+  try{
+    const r=await fetch("/api/files",{headers:hdr()});
+    if(!r.ok){ msg.textContent="Введите пароль в верхнее поле, чтобы увидеть файлы"; return; }
+    const j=await r.json(); msg.textContent=""; gen.textContent=""; up.textContent="";
+    const g=j.files.filter(f=>f.kind==="создано"), u=j.files.filter(f=>f.kind!=="создано");
+    for(const f of g) gen.appendChild(card(f));
+    for(const f of u) up.appendChild(card(f));
+    if(!g.length) gen.textContent="Пока ничего не создано. Создайте картинку или видео в разделе выше.";
+    if(!u.length) up.textContent="Пока ничего не загружено.";
+  }catch(e){ msg.textContent="Не удалось загрузить список: "+e.message; }
 }
 $("reload").onclick=files;
 $("filesbox").addEventListener("toggle",()=>{ if($("filesbox").open) files(); });
