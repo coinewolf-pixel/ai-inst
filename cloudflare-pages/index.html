@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NEXORUM AI — Institutional Trading</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+body{font-family:'Inter',system-ui,sans-serif;background:#0a0e17;color:#f8fafc}
+.glass{background:rgba(17,24,39,.8);backdrop-filter:blur(20px);border:1px solid rgba(255,255,255,.06);border-radius:1rem}
+.neon{box-shadow:0 0 20px rgba(14,165,233,.15),0 0 40px rgba(14,165,233,.05)}
+.text-gradient{background:linear-gradient(90deg,#38bdf8,#22d3ee);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.sidebar-item{display:flex;align-items:center;gap:.75rem;padding:.75rem 1rem;border-radius:.75rem;color:#9ca3af;transition:.2s;cursor:pointer}
+.sidebar-item:hover{color:#fff;background:rgba(255,255,255,.05)}
+.sidebar-item.active{color:#fff;background:rgba(14,165,233,.15);border:1px solid rgba(14,165,233,.3)}
+.scrollbar-hide::-webkit-scrollbar{display:none}
+@keyframes pulse-g{0%,100%{opacity:1}50%{opacity:.5}}
+.pulse-dot{animation:pulse-g 2s infinite}
+</style>
+<script>
+tailwind.config={theme:{extend:{colors:{dark:{bg:'#0a0e17',card:'#111827',border:'#1f2937'},nexorum:{400:'#38bdf8',500:'#0ea5e9',600:'#0284c7'}}}}}
+</script>
+</head>
+<body class="min-h-screen">
+<div class="flex h-screen overflow-hidden">
+
+<!-- Sidebar -->
+<aside id="sidebar" class="w-64 glass border-r border-white/5 flex flex-col">
+<div class="p-6 flex items-center gap-3">
+<div class="w-8 h-8 rounded-lg bg-gradient-to-br from-nexorum-500 to-cyan-400 flex items-center justify-center font-bold text-white">N</div>
+<span class="text-lg font-bold tracking-tight text-gradient">NEXORUM</span>
+</div>
+<nav class="flex-1 px-3 space-y-1">
+<div class="sidebar-item active" onclick="setPage('dashboard')">
+<svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+<span class="text-sm font-medium">Dashboard</span>
+</div>
+<div class="sidebar-item" onclick="setPage('trading')">
+<svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M3 3v18h18"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/></svg>
+<span class="text-sm font-medium">Trading</span>
+</div>
+<div class="sidebar-item" onclick="setPage('agents')">
+<svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/><path d="M9 21V9"/></svg>
+<span class="text-sm font-medium">Agents</span>
+</div>
+<div class="sidebar-item" onclick="setPage('strategies')">
+<svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>
+<span class="text-sm font-medium">Strategies</span>
+</div>
+<div class="sidebar-item" onclick="setPage('risk')">
+<svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+<span class="text-sm font-medium">Risk</span>
+</div>
+<div class="sidebar-item" onclick="setPage('portfolio')">
+<svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 12V7H5a2 2 0 0 1 0-4h14v4"/><path d="M3 5v14a2 2 0 0 0 2 2h16v-5"/><path d="M18 12a2 2 0 0 0 0 4h4v-4z"/></svg>
+<span class="text-sm font-medium">Portfolio</span>
+</div>
+</nav>
+<div class="p-4 border-t border-white/5">
+<div class="sidebar-item" onclick="toggleSidebar()">
+<svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M11 17l-5-5 5-5M18 17l-5-5 5-5"/></svg>
+<span class="text-sm font-medium">Collapse</span>
+</div>
+</div>
+</aside>
+
+<!-- Main -->
+<main class="flex-1 overflow-y-auto scrollbar-hide">
+<header class="sticky top-0 z-40 glass border-b border-white/5 px-8 py-4 flex items-center justify-between">
+<div>
+<h1 class="text-xl font-semibold text-white" id="page-title">Dashboard</h1>
+<p class="text-sm text-gray-400">Institutional Trading Terminal</p>
+</div>
+<div class="flex items-center gap-4">
+<div class="px-3 py-1.5 rounded-lg bg-green-500/10 border border-green-500/20 text-green-400 text-xs font-mono flex items-center gap-2">
+<span class="w-2 h-2 rounded-full bg-green-400 pulse-dot"></span>
+SYSTEM OPERATIONAL
+</div>
+<div class="w-10 h-10 rounded-full bg-nexorum-600/20 border border-nexorum-500/30 flex items-center justify-center text-nexorum-300 font-bold">JD</div>
+</div>
+</header>
+
+<div class="p-8 space-y-6" id="content">
+<!-- Stats -->
+<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4" id="stats-grid"></div>
+
+<!-- Charts -->
+<div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+<div class="lg:col-span-2 glass p-6">
+<div class="flex items-center justify-between mb-6">
+<h3 class="text-sm font-semibold text-gray-300">Portfolio Performance</h3>
+<div class="flex gap-2" id="timeframes"></div>
+</div>
+<canvas id="chart" width="800" height="320"></canvas>
+</div>
+<div class="glass p-6">
+<h3 class="text-sm font-semibold text-gray-300 mb-4">Active Agents</h3>
+<div class="space-y-3" id="agents-list"></div>
+</div>
+</div>
+
+<!-- Bottom -->
+<div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+<div class="glass p-6">
+<h3 class="text-sm font-semibold text-gray-300 mb-4">Recent Orders</h3>
+<div class="space-y-2" id="orders-list"></div>
+</div>
+<div class="glass p-6">
+<h3 class="text-sm font-semibold text-gray-300 mb-4">Risk Overview</h3>
+<div class="space-y-4" id="risk-bars"></div>
+</div>
+</div>
+</div>
+</main>
+</div>
+
+<script>
+// Data
+const stats=[
+{label:"Total Equity",value:"$124,592.40",change:"+2.4%",up:true},
+{label:"24h P&L",value:"+$2,845.20",change:"+8.1%",up:true},
+{label:"Open Positions",value:"12",change:"3 long / 9 short",up:true},
+{label:"Active Agents",value:"4",change:"2 running",up:true},
+{label:"Risk Score",value:"42/100",change:"Low",up:true},
+{label:"AI Signals",value:"28",change:"6 new today",up:true}
+];
+const agents=[
+{name:"Alpha Momentum",status:"running",pnl:"+$1,240"},
+{name:"Grid ETH",status:"running",pnl:"+$845"},
+{name:"Arb Scanner",status:"paused",pnl:"-$120"},
+{name:"Risk Guardian",status:"running",pnl:"N/A"}
+];
+const orders=[
+{sym:"BTC/USDT",side:"buy",qty:"0.50",price:"67,450.00",status:"filled"},
+{sym:"ETH/USDT",side:"sell",qty:"15.00",price:"3,245.80",status:"filled"},
+{sym:"SOL/USDT",side:"buy",qty:"200.00",price:"145.20",status:"open"}
+];
+const risks=[
+{label:"Margin Utilization",val:42,color:"from-nexorum-500 to-cyan-400"},
+{label:"Daily Loss Limit",val:57,color:"from-green-500 to-emerald-400",text:"$2,845 / $5,000"},
+{label:"Max Drawdown",val:32,color:"from-green-500 to-emerald-400",text:"3.2% / 10%"}
+];
+
+// Render stats
+document.getElementById('stats-grid').innerHTML=stats.map(s=>`
+<div class="glass p-5 hover:border-nexorum-500/30 transition-all cursor-pointer">
+<div class="flex items-center justify-between mb-3">
+<span class="text-xs text-gray-500">${s.label}</span>
+<span class="text-xs font-mono px-2 py-0.5 rounded-full ${s.up?'bg-green-500/10 text-green-400':'bg-red-500/10 text-red-400'}">${s.change}</span>
+</div>
+<div class="text-2xl font-bold text-white mb-1">${s.value}</div>
+</div>
+`).join('');
+
+// Render agents
+document.getElementById('agents-list').innerHTML=agents.map(a=>`
+<div class="flex items-center justify-between p-3 rounded-xl bg-white/5 border border-white/5">
+<div class="flex items-center gap-3">
+<div class="w-2 h-2 rounded-full ${a.status==='running'?'bg-green-400 pulse-dot':'bg-yellow-400'}"></div>
+<div>
+<div class="text-sm font-medium text-white">${a.name}</div>
+<div class="text-xs text-gray-500 capitalize">${a.status}</div>
+</div>
+</div>
+<div class="text-xs font-mono font-medium ${a.pnl.startsWith('+')?'text-green-400':a.pnl.startsWith('-')?'text-red-400':'text-gray-400'}">${a.pnl}</div>
+</div>
+`).join('');
+
+// Render orders
+document.getElementById('orders-list').innerHTML=orders.map(o=>`
+<div class="flex items-center justify-between py-2 border-b border-white/5 last:border-0">
+<div class="flex items-center gap-3">
+<span class="text-xs font-bold px-2 py-0.5 rounded ${o.side==='buy'?'bg-green-500/10 text-green-400':'bg-red-500/10 text-red-400'}">${o.side.toUpperCase()}</span>
+<span class="text-sm text-white font-mono">${o.sym}</span>
+</div>
+<div class="text-xs text-gray-400 font-mono">${o.qty} @ ${o.price}</div>
+<span class="text-xs px-2 py-0.5 rounded-full ${o.status==='filled'?'bg-green-500/10 text-green-400':'bg-yellow-500/10 text-yellow-400'}">${o.status}</span>
+</div>
+`).join('');
+
+// Render risk
+document.getElementById('risk-bars').innerHTML=risks.map(r=>`
+<div>
+<div class="flex justify-between text-xs mb-1">
+<span class="text-gray-400">${r.label}</span>
+<span class="${r.text?'text-green-400':'text-nexorum-300'}">${r.text||r.val+'%'}</span>
+</div>
+<div class="h-2 rounded-full bg-white/5 overflow-hidden">
+<div class="h-full w-[${r.val}%] bg-gradient-to-r ${r.color} rounded-full"></div>
+</div>
+</div>
+`).join('')+'<div class="pt-2 border-t border-white/5"><div class="flex items-center justify-between text-xs"><span class="text-gray-400">VaR (95%, 1D)</span><span class="text-white font-mono">$8,500</span></div></div>';
+
+// Timeframes
+const tfs=['1H','1D','1W','1M','YTD'];
+document.getElementById('timeframes').innerHTML=tfs.map(tf=>`
+<button class="px-3 py-1 rounded-lg text-xs font-medium transition-all ${tf==='1M'?'bg-nexorum-600/20 text-nexorum-300 border border-nexorum-500/30':'text-gray-500 hover:text-gray-300'}">${tf}</button>
+`).join('');
+
+// Canvas chart
+const canvas=document.getElementById('chart');
+const ctx=canvas.getContext('2d');
+const dpr=window.devicePixelRatio||1;
+canvas.width=800*dpr;canvas.height=320*dpr;
+ctx.scale(dpr,dpr);
+
+let data=[];let base=10000;
+for(let i=0;i<30;i++){base+=Math.random()*500-200+Math.random()*300;data.push(base);}
+
+function drawChart(){
+ctx.clearRect(0,0,800,320);
+const pad=40;const w=800-pad*2;const h=320-pad*2;
+const min=Math.min(...data);const max=Math.max(...data);
+const range=max-min||1;
+
+// Grid
+ctx.strokeStyle='#1f2937';ctx.lineWidth=1;
+for(let i=0;i<=4;i++){const y=pad+h-(i/4)*h;ctx.beginPath();ctx.moveTo(pad,y);ctx.lineTo(pad+w,y);ctx.stroke();}
+
+// Area
+ctx.beginPath();
+ctx.moveTo(pad,pad+h-((data[0]-min)/range)*h);
+for(let i=1;i<data.length;i++){ctx.lineTo(pad+(i/(data.length-1))*w,pad+h-((data[i]-min)/range)*h);}
+ctx.lineTo(pad+w,pad+h);ctx.lineTo(pad,pad+h);ctx.closePath();
+const grad=ctx.createLinearGradient(0,pad,0,pad+h);
+grad.addColorStop(0,'rgba(14,165,233,0.3)');grad.addColorStop(1,'rgba(14,165,233,0)');
+ctx.fillStyle=grad;ctx.fill();
+
+// Line
+ctx.beginPath();ctx.strokeStyle='#0ea5e9';ctx.lineWidth=2;
+ctx.moveTo(pad,pad+h-((data[0]-min)/range)*h);
+for(let i=1;i<data.length;i++){ctx.lineTo(pad+(i/(data.length-1))*w,pad+h-((data[i]-min)/range)*h);}
+ctx.stroke();
+
+// Labels
+ctx.fillStyle='#4b5563';ctx.font='12px Inter';ctx.textAlign='center';
+for(let i=0;i<5;i++){ctx.fillText('D'+(i*7+1),pad+(i/4)*w,pad+h+20);}
+}
+drawChart();
+
+// Navigation
+function setPage(page){
+document.querySelectorAll('.sidebar-item').forEach(el=>el.classList.remove('active'));
+event.currentTarget.classList.add('active');
+document.getElementById('page-title').textContent=page.charAt(0).toUpperCase()+page.slice(1);
+}
+function toggleSidebar(){
+const sb=document.getElementById('sidebar');
+sb.style.width=sb.style.width==='80px'?'256px':'80px';
+}
+
+// Live ticker simulation
+setInterval(()=>{
+const price=(67450+Math.random()*200-100).toFixed(2);
+},1000);
+</script>
+</body>
+</html>

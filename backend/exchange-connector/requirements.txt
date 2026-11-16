@@ -1,0 +1,15 @@
+fastapi==0.111.0
+uvicorn[standard]==0.30.0
+sqlalchemy[asyncio]==2.0.31
+asyncpg==0.29.0
+pydantic==2.8.2
+pydantic-settings==2.3.4
+httpx==0.27.0
+ccxt==4.4.0
+ccxtpro==4.4.0
+redis==5.0.7
+aiokafka==0.10.0
+python-jose[cryptography]==3.3.0
+websockets==12.0
+prometheus-client==0.20.0
+structlog==24.2.0

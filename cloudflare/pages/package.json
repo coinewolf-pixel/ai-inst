@@ -1,0 +1,11 @@
+{
+  "name": "nexorum-frontend-deploy",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "deploy": "wrangler pages deploy ../../frontend/dist --project-name nexorum-frontend --branch main"
+  },
+  "devDependencies": {
+    "wrangler": "^3.72.0"
+  }
+}
