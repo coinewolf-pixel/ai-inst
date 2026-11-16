@@ -1,0 +1,11 @@
+# Ядро (ai.py, ai_server.py) — только стандартная библиотека Python 3.
+
+# Генерация медиа (ставить в отдельное venv, см. README):
+#   pip install torch --index-url https://download.pytorch.org/whl/cpu
+torch
+diffusers
+transformers
+accelerate
+faster-whisper
+
+# Системные пакеты (apt): ffmpeg fonts-dejavu-core poppler-utils git

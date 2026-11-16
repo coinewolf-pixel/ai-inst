@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NEXORUM AI</title>
+<style>
+:root{
+  --bg:#0a0a10; --bg2:#101018; --panel:#14141d; --panel2:#1a1a26;
+  --border:rgba(255,255,255,.08); --text:#e8e8f0; --muted:#8a8a9a;
+  --accent:#6d5cff; --accent2:#00d4ff; --danger:#ff5470; --ok:#2ee6a8;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{
+  font-family:'Segoe UI',system-ui,-apple-system,sans-serif;
+  background:radial-gradient(1200px 600px at 80% -10%,rgba(109,92,255,.15),transparent),
+             radial-gradient(900px 500px at -10% 110%,rgba(0,212,255,.10),transparent),
+             var(--bg);
+  color:var(--text); height:100vh; display:flex; flex-direction:column; overflow:hidden;
+}
+header{
+  padding:14px 24px; border-bottom:1px solid var(--border);
+  display:flex; align-items:center; gap:14px;
+  background:rgba(16,16,24,.7); backdrop-filter:blur(12px); z-index:10;
+}
+.logo{
+  font-size:19px; font-weight:800; letter-spacing:.5px;
+  background:linear-gradient(90deg,var(--accent),var(--accent2));
+  -webkit-background-clip:text; background-clip:text; color:transparent;
+}
+.status{font-size:12px;color:var(--muted)}
+#key{
+  margin-left:auto; background:var(--panel); border:1px solid var(--border); color:#fff;
+  padding:9px 14px; border-radius:10px; width:230px; outline:none; transition:.2s;
+}
+#key:focus{border-color:var(--accent); box-shadow:0 0 0 3px rgba(109,92,255,.15)}
+#chat{flex:1; overflow-y:auto; padding:24px; display:flex; flex-direction:column; gap:14px}
+.msg{
+  max-width:760px; padding:14px 18px; border-radius:18px; line-height:1.6;
+  white-space:pre-wrap; word-wrap:break-word; animation:pop .25s ease;
+}
+@keyframes pop{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+.me{
+  background:linear-gradient(135deg,var(--accent),#4a3fd1); align-self:flex-end; color:#fff;
+  border-bottom-right-radius:6px; box-shadow:0 4px 20px rgba(109,92,255,.25);
+}
+.ai{
+  background:var(--panel); border:1px solid var(--border); align-self:flex-start;
+  border-bottom-left-radius:6px;
+}
+.meta{font-size:12px;color:var(--muted);margin-top:8px}
+.typing{display:inline-flex;gap:5px;padding:6px 2px}
+.typing span{width:7px;height:7px;border-radius:50%;background:var(--muted);animation:blink 1.2s infinite}
+.typing span:nth-child(2){animation-delay:.2s}.typing span:nth-child(3){animation-delay:.4s}
+@keyframes blink{0%,60%,100%{opacity:.3}30%{opacity:1}}
+.input-area{
+  padding:14px 24px 20px; border-top:1px solid var(--border);
+  background:rgba(16,16,24,.7); backdrop-filter:blur(12px);
+}
+#task,#gen,#editPrompt{
+  width:100%; background:var(--panel); border:1px solid var(--border); color:#fff;
+  padding:14px 16px; border-radius:14px; font:inherit; resize:none; outline:none; transition:.2s;
+}
+#task:focus,#gen:focus,#editPrompt:focus{border-color:var(--accent)}
+.row{display:flex;gap:10px;margin-top:10px;flex-wrap:wrap}
+button{
+  background:linear-gradient(135deg,var(--accent),#4a3fd1); color:#fff; border:0;
+  padding:11px 22px; border-radius:12px; cursor:pointer; font:inherit; font-weight:600;
+  transition:.15s; box-shadow:0 4px 16px rgba(109,92,255,.25);
+}
+button:hover{transform:translateY(-1px);box-shadow:0 6px 22px rgba(109,92,255,.4)}
+button.grey{background:var(--panel2);border:1px solid var(--border);box-shadow:none;font-weight:500}
+button.grey:hover{border-color:var(--accent);box-shadow:none}
+button:disabled{opacity:.5;cursor:not-allowed;transform:none}
+details{
+  background:var(--panel); border:1px solid var(--border); border-radius:14px;
+  margin:10px 24px; padding:12px 18px;
+}
+summary{cursor:pointer;font-weight:600;outline:none;user-select:none}
+#fgen,#fup{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:14px;margin-top:12px}
+.card{
+  background:var(--bg2); border:1px solid var(--border); border-radius:12px;
+  padding:10px; font-size:12px; overflow:hidden; transition:.15s;
+}
+.card:hover{border-color:var(--accent)}
+.card img,.card video{width:100%;height:130px;object-fit:cover;border-radius:8px;display:block;background:#000}
+.drop{
+  border:2px dashed var(--border); border-radius:12px; padding:16px; text-align:center;
+  color:var(--muted); margin-top:10px; transition:.2s; cursor:pointer;
+}
+.drop.over{border-color:var(--accent); background:rgba(109,92,255,.08); color:var(--text)}
+input[type=file]{display:none}
+#toast{
+  position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(80px);
+  background:var(--panel2);border:1px solid var(--border);padding:12px 22px;border-radius:12px;
+  opacity:0;transition:.3s;z-index:100;box-shadow:0 8px 30px rgba(0,0,0,.5);font-size:14px;
+}
+#toast.show{opacity:1;transform:translateX(-50%)}
+#jobs div{padding:3px 0}
+a{color:var(--accent2)}
+::-webkit-scrollbar{width:8px}
+::-webkit-scrollbar-thumb{background:#2a2a3a;border-radius:4px}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">NEXORUM AI</div>
+  <div class="status" id="status">локальный ассистент</div>
+  <input id="key" type="password" placeholder="Пароль доступа">
+</header>
+<div id="chat"></div>
+<div class="input-area">
+  <textarea id="task" placeholder="Напишите задачу... (Enter — отправить, Shift+Enter — новая строка)" rows="2"></textarea>
+  <div class="row">
+    <button id="send">Отправить</button>
+    <button id="mic" class="grey" title="Голосовой ввод">🎤 Голос</button>
+  </div>
+</div>
+<details>
+  <summary>🎨 Создать картинку или видео</summary>
+  <div style="margin-top:12px">
+    <textarea id="gen" placeholder="Опишите, что нарисовать... Для видео: каждая строка — сцена" rows="2"></textarea>
+    <div class="row">
+      <button id="mkimg" class="grey">Создать картинку</button>
+      <button id="mkvid" class="grey">Создать видео по строкам</button>
+    </div>
+    <div id="geninfo" class="meta"></div>
+  </div>
+</details>
+<details>
+  <summary>🖼️ Загрузить фото и изменить / сделать видео</summary>
+  <div style="margin-top:12px">
+    <label class="drop" id="photoDrop">Нажмите, чтобы выбрать фото<input id="photoFile" type="file" accept="image/*"></label>
+    <div class="row" id="photoName" style="font-size:13px;color:var(--muted)"></div>
+    <textarea id="editPrompt" placeholder="Что сделать с фото?" rows="2" style="margin-top:10px"></textarea>
+    <div class="row">
+      <button id="editPhoto" class="grey">Обработать фото</button>
+      <button id="photoToVideo" class="grey">Сделать видео из фото</button>
+    </div>
+    <div id="photoinfo" class="meta"></div>
+  </div>
+</details>
+<details id="filesbox">
+  <summary>📁 Мои файлы</summary>
+  <div class="row"><button id="reload" class="grey">Обновить список</button></div>
+  <div id="filesmsg" class="meta"></div>
+  <h3 style="font-size:14px;margin:12px 0 4px">Создано AI</h3>
+  <div id="fgen"></div>
+  <h3 style="font-size:14px;margin:16px 0 4px">Загружено вами</h3>
+  <div id="fup"></div>
+</details>
+<details>
+  <summary>📚 Добавить файл в базу знаний</summary>
+  <label class="drop" id="upDrop">Перетащите файлы сюда или нажмите<input id="file" type="file" multiple></label>
+  <div class="row"><button id="up" class="grey">Загрузить выбранные</button></div>
+  <div id="upinfo" class="meta" style="white-space:pre-wrap"></div>
+  <div id="jobs" class="meta" style="white-space:pre-wrap"></div>
+</details>
+<div id="toast"></div>
+<script>
+const $=id=>document.getElementById(id);
+function toast(t){ const el=$("toast"); el.textContent=t; el.classList.add("show"); clearTimeout(el._t); el._t=setTimeout(()=>el.classList.remove("show"),3000); }
+function setCookie(){ document.cookie="aikey="+encodeURIComponent($("key").value.trim())+"; path=/; max-age=31536000; SameSite=Strict"; }
+try{ $("key").value=localStorage.getItem("aikey")||""; }catch(e){}
+setCookie();
+$("key").onchange=()=>{ try{localStorage.setItem("aikey",$("key").value)}catch(e){} setCookie(); files(); };
+function hdr(){return {"Content-Type":"application/json","Authorization":"Bearer "+encodeURIComponent($("key").value.trim())};}
+function add(text,cls){ const d=document.createElement("div"); d.className="msg "+(cls||"ai"); d.textContent=text; $("chat").appendChild(d); d.scrollIntoView({behavior:"smooth",block:"end"}); return d; }
+function typing(){ const d=document.createElement("div"); d.className="msg ai"; d.innerHTML='<span class="typing"><span></span><span></span><span></span></span>'; $("chat").appendChild(d); d.scrollIntoView({behavior:"smooth"}); return d; }
+async function api(path,body){ const r=await fetch(path,{method:"POST",headers:hdr(),body:JSON.stringify(body)}); const j=await r.json().catch(()=>({error:"Сервер вернул не JSON"})); if(!r.ok) throw new Error(j.error||("Ошибка "+r.status)); return j; }
+async function ask(){ const task=$("task").value.trim(); if(!task) return; add(task,"me"); $("task").value=""; $("task").style.height="auto"; const wait=typing(); try{ const j=await api("/api/ask",{task}); wait.textContent=j.answer; wait.className="msg ai"; }catch(e){ wait.textContent="Ошибка: "+e.message; wait.className="msg ai"; } }
+$("send").onclick=ask;
+$("task").addEventListener("keydown",e=>{ if(e.key==="Enter"&&!e.shiftKey){ e.preventDefault(); ask(); } });
+$("task").addEventListener("input",function(){ this.style.height="auto"; this.style.height=Math.min(this.scrollHeight,200)+"px"; });
+const micBtn=$("mic"); let recognition=null;
+if("webkitSpeechRecognition" in window||"SpeechRecognition" in window){ const SR=window.SpeechRecognition||window.webkitSpeechRecognition; recognition=new SR(); recognition.lang="ru-RU"; recognition.interimResults=false; micBtn.onclick=()=>{ if(micBtn.textContent.includes("⏹")){recognition.stop();return;} recognition.start(); }; recognition.onstart=()=>{micBtn.textContent="⏹ Стоп";}; recognition.onresult=e=>{ const t=e.results[0][0].transcript; $("task").value=$("task").value.trim()? $("task").value+" "+t : t; }; recognition.onend=()=>{micBtn.textContent="🎤 Голос";}; recognition.onerror=()=>{micBtn.textContent="🎤 Голос";}; } else { micBtn.disabled=true; micBtn.textContent="🎤 Нет поддержки"; }
+function readB64(file){ return new Promise((ok,bad)=>{ const r=new FileReader(); r.onload=()=>ok(String(r.result).split(",")[1]||""); r.onerror=bad; r.readAsDataURL(file); }); }
+async function uploadFile(f){ const data=await readB64(f); const r=await fetch("/api/upload_raw",{method:"POST",headers:Object.assign(hdr(),{"X-File-Name":encodeURIComponent(f.name)}),body:data}); const j=await r.json().catch(()=>({error:"не JSON"})); if(!r.ok) throw new Error(j.error||r.status); return j; }
+async function gen(kind){ const t=$("gen").value.trim(); if(!t){ $("geninfo").textContent="Сначала напишите описание"; return; } if(!$("key").value.trim()){ $("geninfo").textContent="Сначала введите пароль"; return; } const body=kind==="image"?{prompt:t}:{scenes:t.split("\n").filter(x=>x.trim())}; try{ await api("/api/"+kind,body); $("geninfo").textContent="Принято. Смотрите в «Мои файлы»."; jobs(); }catch(e){ $("geninfo").textContent=e.message; } }
+$("mkimg").onclick=()=>gen("image"); $("mkvid").onclick=()=>gen("video");
+let photo=null;
+$("photoFile").onchange=()=>{ photo=$("photoFile").files[0]||null; $("photoName").textContent=photo?("Выбрано: "+photo.name):""; };
+$("photoDrop").onclick=()=>$("photoFile").click();
+$("editPhoto").onclick=async()=>{ const prompt=$("editPrompt").value.trim(); if(!photo){ $("photoinfo").textContent="Сначала выберите фото"; return; } if(!prompt){ $("photoinfo").textContent="Напишите, что сделать с фото"; return; } $("photoinfo").textContent="Загружаю фото..."; try{ await uploadFile(photo); $("photoinfo").textContent="Фото загружено. Генерирую..."; await api("/api/image",{prompt:prompt+" на основе загруженного фото "+photo.name}); $("photoinfo").textContent="Готово. Смотрите в «Мои файлы»."; jobs(); }catch(e){ $("photoinfo").textContent="Ошибка: "+e.message; } };
+$("photoToVideo").onclick=async()=>{ const prompt=$("editPrompt").value.trim()||"сделай короткое видео из этого фото"; if(!photo){ $("photoinfo").textContent="Сначала выберите фото"; return; } $("photoinfo").textContent="Загружаю фото и создаю видео..."; try{ await uploadFile(photo); await api("/api/video",{scenes:[prompt+" с фото "+photo.name]}); $("photoinfo").textContent="Видео в очереди. Смотрите в «Мои файлы»."; jobs(); }catch(e){ $("photoinfo").textContent="Ошибка: "+e.message; } };
+let upFiles=[];
+$("file").onchange=()=>{ upFiles=[...$("file").files]; $("upDrop").textContent=upFiles.length?("Выбрано: "+upFiles.length+" файл(ов). Нажмите, чтобы изменить"):"Перетащите файлы сюда или нажмите"; };
+$("upDrop").onclick=()=>$("file").click();
+["dragover","dragleave","drop"].forEach(ev=>$("upDrop").addEventListener(ev,e=>{ e.preventDefault(); $("upDrop").classList.toggle("over",ev==="dragover"); if(ev==="drop"){ upFiles=[...e.dataTransfer.files]; $("upDrop").textContent="Выбрано: "+upFiles.length+" файл(ов)"; } }));
+$("up").onclick=async()=>{ if(!upFiles.length) return; if(!$("key").value.trim()){ $("upinfo").textContent="Сначала введите пароль"; return; } $("up").disabled=true; const log=[]; const show=()=>{$("upinfo").textContent=log.join("\n");}; let okN=0,badN=0; for(const f of upFiles){ log.push(f.name+": отправляю..."); show(); try{ await uploadFile(f); log[log.length-1]=f.name+": принят ✓"; okN++; }catch(e){ log[log.length-1]=f.name+": ошибка — "+e.message; badN++; } show(); } log.push("Итого: принято "+okN+", ошибок "+badN); show(); $("up").disabled=false; $("upDrop").textContent="Перетащите файлы сюда или нажмите"; jobs(); };
+function human(n){ return n>1048576?(n/1048576).toFixed(1)+" МБ":Math.max(1,Math.round(n/1024))+" КБ"; }
+function card(f){ const c=document.createElement("div"); c.className="card"; if(/[.](png|jpe?g|webp|gif|bmp)$/i.test(f.name)){ const im=document.createElement("img"); im.src=f.url; im.loading="lazy"; c.appendChild(im); } else if(/[.](mp4|webm|mov)$/i.test(f.name)){ const v=document.createElement("video"); v.src=f.url; v.controls=true; v.preload="metadata"; c.appendChild(v); } const t=document.createElement("div"); t.textContent=f.name; t.style.cssText="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:8px"; c.appendChild(t); const m=document.createElement("div"); m.className="meta"; m.textContent=f.kind+", "+human(f.size); c.appendChild(m); const o=document.createElement("a"); o.href=f.url; o.target="_blank"; o.textContent="открыть"; const dl=document.createElement("a"); dl.href=f.url+"?download=1"; dl.textContent="скачать"; dl.style.marginLeft="10px"; c.appendChild(o); c.appendChild(dl); return c; }
+async function files(){ const msg=$("filesmsg"), gen=$("fgen"), up=$("fup"); try{ const r=await fetch("/api/files",{headers:hdr()}); if(!r.ok){ msg.textContent="Введите пароль, чтобы увидеть файлы"; return; } const j=await r.json(); msg.textContent=""; gen.textContent=""; up.textContent=""; const g=j.files.filter(f=>f.kind==="создано"), u=j.files.filter(f=>f.kind!=="создано"); for(const f of g) gen.appendChild(card(f)); for(const f of u) up.appendChild(card(f)); if(!g.length) gen.textContent="Пока ничего не создано."; if(!u.length) up.textContent="Пока ничего не загружено."; }catch(e){ msg.textContent="Ошибка: "+e.message; } }
+$("reload").onclick=files; $("filesbox").addEventListener("toggle",()=>{ if($("filesbox").open) files(); });
+async function jobs(){ try{ const r=await fetch("/api/jobs",{headers:hdr()}); if(!r.ok) return; const j=await r.json(); const box=$("jobs"); box.textContent=""; for(const x of j.jobs.slice(-10).reverse()){ const d=document.createElement("div"); d.textContent=x.file+" — "+x.status; if(x.url){ const a=document.createElement("a"); a.href=x.url; a.target="_blank"; a.textContent=" открыть"; const dl=document.createElement("a"); dl.href=x.url+"?download=1"; dl.textContent=" скачать"; d.appendChild(a); d.appendChild(dl); } box.appendChild(d); } if(j.jobs.some(x=>x.status==="в очереди"||x.status.startsWith("обрабатывается"))) setTimeout(jobs,4000); else if($("filesbox").open) files(); }catch(e){} }
+fetch("/api/health").then(r=>{ $("status").textContent=r.ok?"● онлайн":"● оффлайн"; $("status").style.color=r.ok?"var(--ok)":"var(--danger)"; }).catch(()=>{ $("status").textContent="● оффлайн"; $("status").style.color="var(--danger)"; });
+jobs();
+</script>
+</body>
+</html>

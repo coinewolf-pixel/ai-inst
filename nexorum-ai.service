@@ -1,0 +1,16 @@
+[Unit]
+Description=NEXORUM AI server
+After=network.target ollama.service
+
+[Service]
+Type=simple
+WorkingDirectory=/root/nexorum
+Environment=AI_SERVER_KEY=ЗАМЕНИТЕ_НА_ДЛИННЫЙ_ПАРОЛЬ
+Environment=AI_SERVER_PORT=8000
+ExecStart=/usr/bin/python3 /root/nexorum/ai_server.py
+Restart=always
+RestartSec=5
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target
