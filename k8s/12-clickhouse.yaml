@@ -1,0 +1,69 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: nexorum-clickhouse
+  namespace: nexorum
+spec:
+  serviceName: nexorum-clickhouse
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nexorum-clickhouse
+  template:
+    metadata:
+      labels:
+        app: nexorum-clickhouse
+    spec:
+      containers:
+      - name: clickhouse
+        image: clickhouse/clickhouse-server:latest
+        ports:
+        - containerPort: 8123
+        - containerPort: 9000
+        env:
+        - name: CLICKHOUSE_DB
+          value: "nexorum"
+        - name: CLICKHOUSE_USER
+          valueFrom:
+            configMapKeyRef:
+              name: nexorum-config
+              key: POSTGRES_USER
+        - name: CLICKHOUSE_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: nexorum-secrets
+              key: CLICKHOUSE_PASSWORD
+        volumeMounts:
+        - name: clickhouse-data
+          mountPath: /var/lib/clickhouse
+        resources:
+          requests:
+            memory: "1Gi"
+            cpu: "500m"
+          limits:
+            memory: "4Gi"
+            cpu: "2000m"
+  volumeClaimTemplates:
+  - metadata:
+      name: clickhouse-data
+    spec:
+      accessModes: ["ReadWriteOnce"]
+      resources:
+        requests:
+          storage: 50Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nexorum-clickhouse
+  namespace: nexorum
+spec:
+  selector:
+    app: nexorum-clickhouse
+  ports:
+  - name: http
+    port: 8123
+    targetPort: 8123
+  - name: native
+    port: 9000
+    targetPort: 9000

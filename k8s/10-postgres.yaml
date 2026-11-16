@@ -1,0 +1,61 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: nexorum-postgres
+  namespace: nexorum
+spec:
+  serviceName: nexorum-postgres
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nexorum-postgres
+  template:
+    metadata:
+      labels:
+        app: nexorum-postgres
+    spec:
+      containers:
+      - name: postgres
+        image: timescale/timescaledb:latest-pg16
+        ports:
+        - containerPort: 5432
+        envFrom:
+        - configMapRef:
+            name: nexorum-config
+        env:
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: nexorum-secrets
+              key: POSTGRES_PASSWORD
+        volumeMounts:
+        - name: postgres-data
+          mountPath: /var/lib/postgresql/data
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "250m"
+          limits:
+            memory: "2Gi"
+            cpu: "1000m"
+  volumeClaimTemplates:
+  - metadata:
+      name: postgres-data
+    spec:
+      accessModes: ["ReadWriteOnce"]
+      resources:
+        requests:
+          storage: 20Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nexorum-postgres
+  namespace: nexorum
+spec:
+  selector:
+    app: nexorum-postgres
+  ports:
+  - port: 5432
+    targetPort: 5432
+  type: ClusterIP

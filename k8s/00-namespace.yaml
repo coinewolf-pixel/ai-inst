@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: nexorum
+  labels:
+    app.kubernetes.io/name: nexorum
+    app.kubernetes.io/version: "1.0.0"

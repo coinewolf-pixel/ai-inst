@@ -1,0 +1,133 @@
+# NEXORUM Helm Values
+
+global:
+  imageRegistry: ""
+  imagePullSecrets: []
+  storageClass: "standard"
+
+postgresql:
+  enabled: true
+  auth:
+    username: nexorum
+    password: nexorum_secret
+    database: nexorum
+  primary:
+    persistence:
+      size: 50Gi
+    resources:
+      requests:
+        memory: 512Mi
+        cpu: 250m
+      limits:
+        memory: 2Gi
+        cpu: 1000m
+
+redis:
+  enabled: true
+  auth:
+    password: redis_secret
+  master:
+    persistence:
+      size: 10Gi
+    resources:
+      requests:
+        memory: 256Mi
+        cpu: 100m
+      limits:
+        memory: 512Mi
+        cpu: 500m
+
+kafka:
+  enabled: true
+  replicaCount: 1
+  persistence:
+    size: 20Gi
+
+clickhouse:
+  enabled: true
+  auth:
+    username: nexorum
+    password: ch_secret
+  persistence:
+    size: 100Gi
+
+# Microservices
+services:
+  aiOrchestrator:
+    replicaCount: 2
+    image:
+      repository: nexorum/ai-orchestrator
+      tag: latest
+      pullPolicy: IfNotPresent
+    resources:
+      requests:
+        memory: 256Mi
+        cpu: 250m
+      limits:
+        memory: 1Gi
+        cpu: 1000m
+    autoscaling:
+      enabled: true
+      minReplicas: 2
+      maxReplicas: 10
+      targetCPUUtilizationPercentage: 70
+
+  exchangeConnector:
+    replicaCount: 3
+    image:
+      repository: nexorum/exchange-connector
+      tag: latest
+    autoscaling:
+      enabled: true
+      minReplicas: 3
+      maxReplicas: 15
+      targetCPUUtilizationPercentage: 60
+
+  riskEngine:
+    replicaCount: 2
+    image:
+      repository: nexorum/risk-engine
+      tag: latest
+
+  authService:
+    replicaCount: 2
+    image:
+      repository: nexorum/auth-service
+      tag: latest
+
+  marketData:
+    replicaCount: 2
+    image:
+      repository: nexorum/market-data
+      tag: latest
+
+  frontend:
+    replicaCount: 2
+    image:
+      repository: nexorum/frontend
+      tag: latest
+    service:
+      type: ClusterIP
+      port: 3000
+
+# Ingress
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+  hosts:
+    - host: api.nexorum.ai
+      paths:
+        - path: /
+          pathType: Prefix
+    - host: app.nexorum.ai
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: nexorum-tls
+      hosts:
+        - api.nexorum.ai
+        - app.nexorum.ai

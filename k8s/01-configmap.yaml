@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nexorum-config
+  namespace: nexorum
+data:
+  POSTGRES_USER: "nexorum"
+  POSTGRES_DB: "nexorum"
+  REDIS_URL: "redis://nexorum-redis:6379/0"
+  KAFKA_BOOTSTRAP_SERVERS: "kafka:9092"
+  CLICKHOUSE_URL: "http://nexorum-clickhouse:8123/nexorum"
+  DEFAULT_AI_MODEL: "gpt-4o"
+  JWT_ALGORITHM: "HS256"
+  ACCESS_TOKEN_EXPIRE_MINUTES: "30"
+  REFRESH_TOKEN_EXPIRE_DAYS: "7"

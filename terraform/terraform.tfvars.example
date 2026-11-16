@@ -1,0 +1,3 @@
+hcloud_token         = "YOUR_HETZNER_TOKEN"
+cloudflare_api_token = "YOUR_CLOUDFLARE_TOKEN"
+domain               = "nexorum.ai"

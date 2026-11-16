@@ -1,0 +1,23 @@
+apiVersion: v2
+name: nexorum
+description: NEXORUM AI Institutional Trading Platform
+type: application
+version: 1.0.0
+appVersion: "1.0.0"
+dependencies:
+  - name: postgresql
+    version: "13.2.0"
+    repository: "https://charts.bitnami.com/bitnami"
+    condition: postgresql.enabled
+  - name: redis
+    version: "18.6.0"
+    repository: "https://charts.bitnami.com/bitnami"
+    condition: redis.enabled
+  - name: kafka
+    version: "26.4.0"
+    repository: "https://charts.bitnami.com/bitnami"
+    condition: kafka.enabled
+  - name: clickhouse
+    version: "4.1.0"
+    repository: "https://charts.bitnami.com/bitnami"
+    condition: clickhouse.enabled

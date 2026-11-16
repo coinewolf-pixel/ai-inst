@@ -1,0 +1,58 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nexorum-market-data
+  namespace: nexorum
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: nexorum-market-data
+  template:
+    metadata:
+      labels:
+        app: nexorum-market-data
+    spec:
+      containers:
+      - name: market-data
+        image: nexorum/market-data:latest
+        ports:
+        - containerPort: 8000
+        envFrom:
+        - configMapRef:
+            name: nexorum-config
+        envFrom:
+        - secretRef:
+            name: nexorum-secrets
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "250m"
+          limits:
+            memory: "1Gi"
+            cpu: "1000m"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: 8000
+          initialDelaySeconds: 5
+          periodSeconds: 5
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nexorum-market-data
+  namespace: nexorum
+spec:
+  selector:
+    app: nexorum-market-data
+  ports:
+  - port: 8000
+    targetPort: 8000
+  type: ClusterIP
